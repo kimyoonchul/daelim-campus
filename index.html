@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>대림 캠퍼스 온라인 — 전산관에서 다시 만나요</title>
+<meta name="description" content="대림대학교 안양 캠퍼스를 3D로 걸어 다니며 동문들과 만나는 비공식 동문 프로젝트. 전산관, 지공모·COMMON·모비딕 동아리방, 스탬프 투어, 등굣길 타임어택.">
+<meta name="theme-color" content="#0e1420">
+<meta property="og:title" content="대림 캠퍼스 온라인">
+<meta property="og:description" content="전산관에서 다시 만나요 — 3D 캠퍼스를 걸으며 채팅하는 비공식 동문 프로젝트">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23008fd5'/%3E%3Cpath d='M12 46 32 14l20 32z' fill='%23fff'/%3E%3Crect x='27' y='34' width='10' height='12' fill='%23008fd5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=1">
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<!-- 불러오는 중 -->
+<div id="loading" class="screen">
+  <div class="loadbox">
+    <div class="logo">대림 캠퍼스 <b>온라인</b></div>
+    <div class="bar"><i id="loadbar"></i></div>
+    <p id="loadmsg">캠퍼스를 짓는 중…</p>
+  </div>
+</div>
+
+<!-- 입장 -->
+<div id="join" class="screen hidden">
+  <form id="joinForm" class="card" autocomplete="off">
+    <h1>대림 캠퍼스 <b>온라인</b></h1>
+    <p class="sub">전산관에서 다시 만나요 · 비공식 동문 프로젝트</p>
+    <label class="field"><span>닉네임 <em>*</em></span>
+      <input id="fName" maxlength="12" required placeholder="예: 임곡동날다람쥐" enterkeyhint="next"></label>
+    <div class="row">
+      <label class="field small"><span>학번(입학 연도)</span>
+        <input id="fYear" inputmode="numeric" maxlength="2" pattern="[0-9]{2}" placeholder="08"></label>
+      <label class="field"><span>학과</span>
+        <select id="fMajor"></select></label>
+    </div>
+    <div class="field"><span>동아리</span>
+      <div class="chips" id="fClub"></div>
+      <input id="fClubText" class="hidden" maxlength="8" placeholder="동아리 이름">
+    </div>
+    <label class="field"><span>한마디</span>
+      <input id="fTag" maxlength="30" placeholder="예: 5층 실습실에서 밤새 본 사람"></label>
+    <div class="field"><span>과잠 색</span>
+      <div class="swatches" id="fColors"></div>
+    </div>
+    <p class="notice">여기 적은 내용은 지금 접속한 <b>모든 사람에게 보입니다.</b> 실명·전화번호 같은 개인정보는 적지 마세요. 대화는 저장되지 않습니다.</p>
+    <button type="submit" class="primary">캠퍼스 입장</button>
+    <p class="fine">대림대학교 공식 서비스가 아닌 동문 개인 프로젝트입니다 · 지도 자료 © OpenStreetMap contributors</p>
+  </form>
+</div>
+
+<!-- 게임 화면 -->
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div class="brand">대림 캠퍼스 <b>온라인</b></div>
+    <div id="place">정문</div>
+    <button id="net" type="button" title="접속자 보기"><i></i><span>연결 중…</span></button>
+  </div>
+
+  <div id="side">
+    <canvas id="minimap" width="360" height="360"></canvas>
+    <div id="stats">
+      <div class="stat" id="sStamp" title="스탬프 투어"><span>📍</span><b>0/15</b></div>
+      <div class="stat" id="sGrade" title="모은 A+"><span>🅰</span><b>0</b></div>
+    </div>
+    <div id="menu">
+      <button data-menu="stamps" title="스탬프북 (B)">📖</button>
+      <button data-menu="players" title="접속자 (Tab)">👥</button>
+      <button data-menu="map" title="전체 지도 (M)">🗺️</button>
+      <button data-menu="emote" title="감정표현 (1~6)">🙌</button>
+      <button data-menu="time" title="낮·노을·밤">🌙</button>
+      <button data-menu="help" title="도움말 (H)">❓</button>
+    </div>
+  </div>
+
+  <div id="stamina"><i></i></div>
+  <div id="timer" class="hidden"></div>
+  <div id="prompt" class="hidden"><kbd>E</kbd><span></span></div>
+  <div id="banner" class="hidden"><b></b><span></span></div>
+  <div id="toasts"></div>
+
+  <div id="chat">
+    <div id="chatlog" aria-live="polite"></div>
+    <form id="chatform" autocomplete="off">
+      <input id="chatinput" maxlength="120" placeholder="Enter 키로 채팅" enterkeyhint="send">
+      <button type="submit" aria-label="보내기">➤</button>
+    </form>
+  </div>
+
+  <div id="emotes">
+    <button data-emote="1" title="인사 (1)">👋</button>
+    <button data-emote="2" title="환호 (2)">🎉</button>
+    <button data-emote="3" title="춤 (3)">💃</button>
+    <button data-emote="4" title="꾸벅 (4)">🙇</button>
+    <button data-emote="5" title="앉기 (5)">🧘</button>
+    <button data-emote="6" title="하트 (6)">❤️</button>
+  </div>
+
+  <div id="touch">
+    <div id="joy"><div id="knob"></div></div>
+    <button id="bRun" type="button">달리기</button>
+    <button id="bAct" type="button" class="hidden">E</button>
+    <button id="bJump" type="button">점프</button>
+  </div>
+</div>
+
+<!-- 패널(스탬프북·건물 안내·미니게임 등) -->
+<div id="panel" class="hidden">
+  <div class="card">
+    <button id="panelClose" type="button" aria-label="닫기">✕</button>
+    <h2 id="panelTitle"></h2>
+    <div id="panelBody"></div>
+  </div>
+</div>
+
+<noscript>이 페이지는 자바스크립트와 WebGL이 필요합니다.</noscript>
+<script type="module" src="src/main.js?v=1"></script>
+</body>
+</html>

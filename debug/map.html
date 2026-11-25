@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>캠퍼스 데이터 확인용 2D 지도</title>
+<style>
+  body { margin: 0; background: #1b1f24; color: #dde; font: 12px/1.4 system-ui, sans-serif; }
+  #info { position: fixed; left: 8px; top: 8px; background: #000a; padding: 4px 8px; border-radius: 6px; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="info">-</div>
+<canvas id="c"></canvas>
+<script type="module">
+import data from '../data/campus-data.js';
+import { H, grid, heightAt } from '../src/world/heightfield.js';
+
+const q = new URLSearchParams(location.search);
+const S = +(q.get('s') || 2.2); // px per m
+const cxm = +(q.get('x') || -20), czm = +(q.get('z') || 0); // 화면 중심(m)
+const W = +(q.get('w') || 1400), Hh = +(q.get('h') || 1300);
+const cv = document.getElementById('c');
+cv.width = W; cv.height = Hh;
+const g = cv.getContext('2d');
+const px = (x) => (x - cxm) * S + W / 2;
+const pz = (z) => (z - czm) * S + Hh / 2;
+
+// 높이 음영
+const cell = grid.STEP * S;
+for (let k = 0; k < grid.NZ; k++) for (let i = 0; i < grid.NX; i++) {
+  const h = H[k * grid.NX + i];
+  const x = px(grid.X0 + i * grid.STEP), z = pz(grid.Z0 + k * grid.STEP);
+  if (x < -cell || z < -cell || x > W || z > Hh) continue;
+  const t = Math.max(0, Math.min(1, (h + 6) / 80));
+  const band = Math.floor(h / 2) % 2 === 0 ? 0 : 10;
+  g.fillStyle = `rgb(${50 + t * 150 + band},${90 + t * 110 + band},${60 + t * 40})`;
+  g.fillRect(x - cell / 2, z - cell / 2, cell + 0.6, cell + 0.6);
+}
+const poly = (p) => { g.beginPath(); p.forEach((v, i) => (i ? g.lineTo(px(v[0]), pz(v[1])) : g.moveTo(px(v[0]), pz(v[1])))); g.closePath(); };
+const AC = { field: '#d9c08a', court: '#4f9d6b', parking: '#8d9299', wood: '#2f6b3a88', square: '#c9b9a0', park: '#6fae6f88', golf: '#1f7a55aa', smoking: '#b55', playground: '#caa', water: '#4a86c8' };
+for (const a of data.areas) { poly(a.poly); g.fillStyle = AC[a.kind] || '#f0f'; g.fill(); }
+const RC = { primary: '#f2d27a', primary_link: '#f2d27a', tertiary: '#fff', residential: '#eee', service: '#ddd', footway: '#f7b0a0', path: '#c9a', steps: '#ff5d5d', cycleway: '#9cf' };
+for (const r of data.roads) {
+  g.beginPath(); r.pts.forEach((v, i) => (i ? g.lineTo(px(v[0]), pz(v[1])) : g.moveTo(px(v[0]), pz(v[1]))));
+  g.strokeStyle = r.conveying ? '#00e5ff' : r.bridge ? '#f0f' : RC[r.kind] || '#f0f'; g.lineWidth = Math.max(1, r.w * S * 0.8); g.globalAlpha = 0.85; g.stroke(); g.globalAlpha = 1;
+}
+poly(data.campus); g.strokeStyle = '#ff0'; g.lineWidth = 2; g.setLineDash([8, 6]); g.stroke(); g.setLineDash([]);
+for (const b of data.buildings) {
+  poly(b.poly); g.fillStyle = b.campus ? '#b5533cdd' : '#5b6470cc'; g.fill(); g.strokeStyle = '#000'; g.lineWidth = 1; g.stroke();
+  if (b.campus) {
+    g.fillStyle = '#fff'; g.font = 'bold 13px sans-serif'; g.textAlign = 'center';
+    g.fillText(`${b.letter} ${b.name}`, px(b.c[0]), pz(b.c[1]) - 2);
+    g.font = '11px sans-serif'; g.fillText(`${b.base}→${b.top}m`, px(b.c[0]), pz(b.c[1]) + 12);
+    if (b.door) { g.fillStyle = '#0f0'; g.beginPath(); g.arc(px(b.door.x), pz(b.door.z), 5, 0, 7); g.fill();
+      g.strokeStyle = '#0f0'; g.beginPath(); g.moveTo(px(b.door.x), pz(b.door.z)); g.lineTo(px(b.door.x + b.door.nx * 6), pz(b.door.z + b.door.nz * 6)); g.stroke(); }
+  } else if (b.label) { g.fillStyle = '#ccd'; g.font = '10px sans-serif'; g.textAlign = 'center'; const c = b.poly.reduce((s, v) => [s[0] + v[0] / b.poly.length, s[1] + v[1] / b.poly.length], [0, 0]); g.fillText(b.label, px(c[0]), pz(c[1])); }
+}
+for (const p of data.pois) { g.fillStyle = p.kind === 'bus' ? '#39f' : '#fa0'; g.fillRect(px(p.x) - 3, pz(p.z) - 3, 6, 6); }
+// 격자 눈금 50m
+g.strokeStyle = '#ffffff33'; g.fillStyle = '#fff9'; g.font = '10px sans-serif'; g.textAlign = 'left'; g.lineWidth = 1;
+for (let x = -350; x <= 350; x += 50) { g.beginPath(); g.moveTo(px(x), 0); g.lineTo(px(x), Hh); g.stroke(); g.fillText('x' + x, px(x) + 2, 34); }
+for (let z = -300; z <= 300; z += 50) { g.beginPath(); g.moveTo(0, pz(z)); g.lineTo(W, pz(z)); g.stroke(); g.fillText('z' + z, 2, pz(z) - 2); }
+// 높이 숫자(20m 간격)
+const stepLbl = +(q.get('lbl') || 20);
+g.fillStyle = '#000c'; g.font = '9px sans-serif'; g.textAlign = 'center';
+for (let x = -340; x <= 310; x += stepLbl) for (let z = -310; z <= 310; z += stepLbl) g.fillText(heightAt(x, z).toFixed(0), px(x), pz(z));
+cv.addEventListener('mousemove', (e) => {
+  const x = (e.offsetX - W / 2) / S + cxm, z = (e.offsetY - Hh / 2) / S + czm;
+  document.getElementById('info').textContent = `x ${x.toFixed(1)}  z ${z.toFixed(1)}  h ${heightAt(x, z).toFixed(1)}m`;
+});
+window.__ready = true;
+</script>
+</body>
+</html>
