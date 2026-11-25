@@ -66,7 +66,7 @@ export function createNet(profile) {
   const listeners = {};
   const peers = new Map(); // id → {profile, last, stateSeq, seen[], tokens, chats[], joined}
   const clients = []; // {url, mq, state, fails}
-  let seq = Math.floor(Date.now() / 1000) % 100000; // 새로고침 뒤에도 순번이 뒤로 가지 않게
+  let seq = Date.now(); // 새로고침 뒤에도 순번이 항상 커지도록 시각에서 시작한다
   let chan = null;
   let stopped = false;
   let lastHi = 0;
@@ -205,7 +205,7 @@ export function createNet(profile) {
       if (!Array.isArray(msg) || msg.length < 7) return;
       const [q, x, y, z, yaw, flags, zone, emote] = msg;
       if (![q, x, y, z, yaw].every(Number.isFinite) || !ZONES.includes(zone)) return;
-      if (q <= p.stateSeq && p.stateSeq - q < 5000) return; // 다른 브로커로 온 같은 메시지·늦게 온 메시지
+      if (q <= p.stateSeq && p.stateSeq - q < 100000) return; // 다른 브로커로 온 같은 메시지·늦게 온 메시지
       p.stateSeq = q;
       const st = {
         x: Math.max(grid.X0, Math.min(grid.X1, x)),
@@ -346,6 +346,11 @@ export function createNet(profile) {
     addEventListener('pagehide', () => {
       net.sendEvent('bye');
     });
+  };
+
+  /** 시험용: 브로커 연결을 강제로 끊어 재연결을 확인한다 */
+  net.debugDrop = () => {
+    for (const c of clients) if (c.mq && c.mq.ws) c.mq.ws.close();
   };
 
   net.stop = () => {

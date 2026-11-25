@@ -150,6 +150,7 @@ body.touch #timer { top: calc(150px + var(--safe-t)); font-size: 21px; }
   body.touch #bJump { bottom: calc(26px + var(--safe-b)); }
   body.touch #bRun, body.touch #bAct { bottom: calc(108px + var(--safe-b)); }
   body.touch #prompt { bottom: calc(18px + var(--safe-b)); }
+  body.touch #stamina { bottom: calc(64px + var(--safe-b)); }
   body.touch #toasts { top: calc(56px + var(--safe-t)); }
   body.touch #timer { top: calc(96px + var(--safe-t)); }
 }

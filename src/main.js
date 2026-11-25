@@ -34,6 +34,7 @@ const ZONE_CODE = { campus: 'c', js4: 'j4', js5: 'j5' };
 async function boot() {
   const input = createInput(canvas);
   const ui = createUI(input);
+  store.data.muted = []; // 접속 ID는 매번 바뀌므로 숨김 목록은 접속할 때마다 비운다
   ui.loading('글꼴을 불러오는 중…', 0.08);
   // 간판·이름표를 캔버스에 그리므로 글꼴이 먼저 있어야 한다(늦으면 기본 글꼴로 진행)
   try {
@@ -133,6 +134,11 @@ async function boot() {
 
   // ----- 프레임 -----
   let netT = 0;
+  let lastNetState = null;
+  // 탭이 가려지면 화면 갱신(rAF)이 멈추므로, 그동안은 타이머로 생존 신호만 보낸다
+  setInterval(() => {
+    if (document.hidden && lastNetState) net.tick(1, lastNetState);
+  }, 1000);
   engine.onUpdate((dt) => {
     input.poll();
     player.frozen = ui.panel.isOpen() || !!player.climbFrozen;
@@ -141,7 +147,7 @@ async function boot() {
     engine.follow(player.pos.x, player.pos.y, player.pos.z);
     remotes.update(dt);
     game.update(dt);
-    net.tick(dt, {
+    lastNetState = {
       x: player.pos.x,
       y: player.pos.y,
       z: player.pos.z,
@@ -149,7 +155,8 @@ async function boot() {
       flags: (player.onGround ? 0 : 1) | (player.running ? 2 : 0),
       zone: ZONE_CODE[player.zone] || 'c',
       emote: player.avatar.emote,
-    });
+    };
+    net.tick(dt, lastNetState);
     netT += dt;
     if (netT > 0.5) {
       netT = 0;

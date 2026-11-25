@@ -1,5 +1,5 @@
 // 시험용 봇: 두 번째 접속자 흉내를 낸다(같은 프로토콜로 걷고, 채팅하고, 나간다).
-// 실행: node tools/bot.mjs [초=40] [이름=봇돌이] [x=-3] [z=140]
+// 실행: ROOM=test node tools/bot.mjs [초=40] [이름=봇돌이] [x=-3] [z=140] [y=10]
 import { MqttLite } from '../src/net/mqtt-lite.js';
 import { NET } from '../src/config.js';
 
@@ -8,7 +8,8 @@ const name = process.argv[3] || '봇돌이';
 const cx = Number(process.argv[4] || -3);
 const cz = Number(process.argv[5] || 140);
 const id = 'bot' + Math.random().toString(36).slice(2, 9);
-const base = `${NET.prefix}/${NET.room}/`;
+const room = process.env.ROOM || NET.room; // 시험할 때는 ROOM=test 처럼 다른 방을 쓴다
+const base = `${NET.prefix}/${room}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let seq = 1;
 

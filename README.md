@@ -25,6 +25,7 @@
 - **접속자 정보와 채팅은 공개됩니다.** 서버 없이 동작하도록 가입이 필요 없는 공개 MQTT 브로커(`broker.emqx.io`, `test.mosquitto.org`, 예비 `mqtt-dashboard.com`)를 중계로 씁니다. 같은 주제를 구독하면 누구나 내용을 볼 수 있으므로 실명·연락처는 적지 마세요.
 - **대화는 어디에도 저장되지 않습니다.** 같은 시간에 접속한 사람끼리만 보이고, 지난 대화·방명록은 없습니다.
 - 공개 브로커는 시험용 무료 서비스라 가끔 느리거나 끊길 수 있습니다. 그때는 혼자 걷기로 계속되고 자동으로 다시 연결합니다. 안정적으로 쓰려면 `src/config.js`의 `NET.brokers`를 직접 운영하는 브로커 주소로 바꾸면 됩니다.
+- 주소 끝에 `?room=이름`(영소문자·숫자 16자 이내)을 붙이면 그 주소를 아는 사람끼리만 만나는 방이 됩니다. 예: `…/daelim-campus/?room=mobidic08` (비밀번호가 아니라 이름만 다른 방이므로 내용이 암호화되지는 않습니다.)
 - 받은 메시지는 형식·길이·좌표 범위를 검사하고, 보낸 사람별로 속도를 제한하며, 화면에는 항상 글자로만(`textContent`) 넣습니다. 접속자 목록에서 특정 사람의 채팅을 숨길 수 있습니다.
 
 ## 무엇이 실제이고 무엇이 상상인가
@@ -69,7 +70,7 @@ tools/                          데이터 생성과 점검 도구
 node tools/serve.mjs 8137        # http://localhost:8137
 node tools/check-syntax.mjs      # 문법·숨은 제어문자 점검
 node tools/build-campus.mjs      # OSM + 고도 → data/campus-data.js
-node tools/bot.mjs 40            # 시험용 두 번째 접속자(40초간 정문 근처를 걷고 채팅)
+ROOM=test node tools/bot.mjs 40  # 시험용 두 번째 접속자(브라우저는 ?room=test 로 열 것)
 node tools/spike-mqtt.mjs        # 공개 브로커 접속·지연 점검
 ```
 
