@@ -83,7 +83,8 @@ export function createUI(input) {
       drawColors();
 
       $('join').classList.remove('hidden');
-      if (!input.touch) setTimeout(() => $('fName').focus(), 50);
+      // 입장 폼이 아직 떠 있을 때만(아주 빨리 입장하면 이 타이머가 입장 뒤에 돌아 게임 키 입력을 이름 칸이 가로챌 수 있다)
+      if (!input.touch) setTimeout(() => !$('join').classList.contains('hidden') && $('fName').focus(), 50);
       $('joinForm').onsubmit = (e) => {
         e.preventDefault();
         const n = $('fName').value.trim();
@@ -268,8 +269,9 @@ export function createUI(input) {
 
   // ---------- 패널 ----------
   let onClose = null;
+  const panelEl = $('panel'); // 매 프레임 여러 모듈이 묻는다: 요소는 한 번만 찾아 둔다
   ui.panel = {
-    isOpen: () => !$('panel').classList.contains('hidden'),
+    isOpen: () => !panelEl.classList.contains('hidden'),
     open(title, body, opts = {}) {
       if (ui.panel.isOpen() && onClose) {
         const f = onClose;

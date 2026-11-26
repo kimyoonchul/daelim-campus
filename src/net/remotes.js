@@ -55,6 +55,7 @@ export function createRemotes(engine, net, getZone) {
         wpnChangedAt: -1e9,
         atkPose: null, // {x, y, z, yaw, ax, az, w, zone}: 공격이 실린 스냅샷의 원본 값(w는 그때 든 무기)
         atkEvents: 0, // 공격을 받을 때마다 늘어난다(스냅샷 하나에 최대 2). 무기 모듈이 늘어난 만큼 재현한다
+        carDrawnAt: -1, // 차량 모듈이 이 사람의 차를 마지막으로 그린 프레임의 engine.time(그 프레임에만 아바타를 숨긴다)
         hpShown: null, // 체력 막대에 표시 중인 값(무기를 안 들면 null)
         fresh: true, // 첫 스냅샷을 아직 받지 않았다
       };
@@ -191,8 +192,9 @@ export function createRemotes(engine, net, getZone) {
       const g = r.avatar.group;
       g.position.set(x, y, z);
       g.rotation.y = yaw;
-      // 차에 탄 사람은 차량 모듈이 차째로 그린다
-      g.visible = r.zone === myZone && r.car < 0;
+      // 차에 탄 사람은 차량 모듈이 차째로 그린다(차량 모듈이 이번 프레임에 먼저 돌며 carDrawnAt을 적는다).
+      // 차를 그리지 못했으면(모듈이 꺼졌거나 다른 구역 번호 등) 아바타라도 보인다 — 보이지 않는 운전자가 생기지 않게
+      g.visible = r.zone === myZone && !(r.car >= 0 && r.carDrawnAt === engine.time);
       r.avatar.update(dt, moved, dt > 0 ? moved / dt : 0, air);
     }
   };

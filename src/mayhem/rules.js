@@ -19,7 +19,10 @@ export const WEAPONS = [
 export const CAR_HIT = { range: 6, maxHit: 60, knock: 12 };
 export const MAX_HP = 100;
 // staleMs: 공격자의 마지막 상태가 이보다 오래됐으면 주장을 받지 않는다 · lockSec: 전투 잠금(초) · maxKnock: 넉백 속도 상한(m/s)
-export const LIMITS = { hitsPerAttackerPerSec: 6, hitsPerSec: 10, dmgPerSec: 120, staleMs: 3500, lockSec: 6, maxKnock: 16 };
+// 공격자별 상한은 8이다(설계서 처음 값 6에서 올림). 주장은 0.4초 묶음으로 와서 1초 창에 묶음이 3개까지 들어가므로,
+//   6이면 물총(cd 0.14) 한 사람의 연사 중 4분의 1이 피해 없이 버려진다. 8이면 60Hz에서 전부, 75~165Hz에서 9할 넘게 받아진다.
+//   위조 대비의 본체는 보낸 사람과 상관없는 전체 상한(hitsPerSec·dmgPerSec)이다.
+export const LIMITS = { hitsPerAttackerPerSec: 8, hitsPerSec: 10, dmgPerSec: 120, staleMs: 3500, lockSec: 6, maxKnock: 16 };
 
 // 거리 판정의 여유: 사거리 + SLACK + 0.5초 동안 공격자가 움직일 수 있는 거리(걸어서 7.8m/s, 차로 23m/s)
 const SLACK = 6;

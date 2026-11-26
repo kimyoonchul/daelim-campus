@@ -52,7 +52,7 @@ test('무기표가 설계서와 같다', () => {
   assert.deepEqual([WEAPONS[4].range, WEAPONS[4].gravity, WEAPONS[4].dmg, WEAPONS[4].radius, WEAPONS[4].bdmg, WEAPONS[4].maxHit, WEAPONS[4].speedMul], [110, 14, 80, 9, 60, 85, 0.72]);
   assert.deepEqual(CAR_HIT, { range: 6, maxHit: 60, knock: 12 });
   assert.equal(MAX_HP, 100);
-  assert.deepEqual(LIMITS, { hitsPerAttackerPerSec: 6, hitsPerSec: 10, dmgPerSec: 120, staleMs: 3500, lockSec: 6, maxKnock: 16 });
+  assert.deepEqual(LIMITS, { hitsPerAttackerPerSec: 8, hitsPerSec: 10, dmgPerSec: 120, staleMs: 3500, lockSec: 6, maxKnock: 16 });
   assert.equal(hitSpec(1), WEAPONS[1]);
   assert.equal(hitSpec('car'), CAR_HIT);
   for (const w of [0, 5, -1, 2.5, '1', null, undefined, NaN, 'boss']) assert.equal(hitSpec(w), null);
@@ -197,7 +197,7 @@ test("차로 들이받기('car')는 공격자가 차에 타고 있을 때만", (
   near(reach(1, true) - reach(1, false), 0.5 * (23 - 7.8));
 });
 
-test('도배: 같은 공격자의 주장은 1초에 6번까지만', () => {
+test('도배: 같은 공격자의 주장은 1초에 8번까지만', () => {
   const recent = [];
   let ok = 0;
   for (let i = 0; i < 40; i++) {
@@ -224,6 +224,46 @@ test('도배: 공격자 id를 바꿔 가며 보내도 전체 1초에 10번까지
     } else assert.equal(r.reason, 'flood');
   }
   assert.equal(ok, LIMITS.hitsPerSec);
+});
+
+test('물총 연사(쿨다운 0.14초, 60fps)를 0.4초 묶음으로 받으면 거의 다 받고, 한 공격자에게서는 어느 1초에도 8건까지만 받는다', () => {
+  const recent = [];
+  const cd = WEAPONS[2].cd;
+  const FPS = 60;
+  let ready = 0;
+  let lastFlush = -Infinity;
+  let pending = 0;
+  let shots = 0;
+  const okAt = [];
+  for (let f = 0; f <= FPS * 6; f++) {
+    const t = f / FPS;
+    // 쿨다운이 끝난 첫 프레임에 쏜다(무기 모듈과 같다)
+    if (t >= ready - 1e-9) {
+      ready = t + cd;
+      shots++;
+      pending++;
+    }
+    // 주장은 쌓인 것이 있을 때 0.4초에 한 묶음으로 간다(index.js의 flushFx와 같다 — 첫 주장은 바로)
+    if (pending > 0 && t - lastFlush >= 0.4 - 1e-9) {
+      lastFlush = t;
+      const now = NOW + t * 1000;
+      for (; pending > 0; pending--) {
+        const r = validateHit({ victim: mkVictim(), attacker: mkAttacker({ wpn: 2, x: 20, stateAt: now }), msg: { d: 6, w: 2, x: 0, z: 0 }, recent, now, combatZones: ['campus'] });
+        if (r.ok) {
+          okAt.push(now);
+          recent.push({ t: now, d: r.d, from: 'attacker1' });
+        } else assert.equal(r.reason, 'flood-attacker');
+      }
+    }
+  }
+  assert.ok(shots > 6 * 6, '쏜 수 ' + shots);
+  for (let i = 0; i < okAt.length; i++) {
+    let n = 0;
+    for (let j = i; j < okAt.length && okAt[j] - okAt[i] < 1000; j++) n++;
+    assert.ok(n <= LIMITS.hitsPerAttackerPerSec, `1초에 ${n}건을 받았다`);
+  }
+  // 상한 8이면 60fps에서 묶음이 와도 9할 넘게 받는다(6이면 4분의 3쯤 — rules.js의 LIMITS 주석)
+  assert.ok(okAt.length >= shots * 0.9, `쏜 ${shots}발 중 ${okAt.length}발만 받았다`);
 });
 
 test('도배: 받아들이는 피해는 1초에 120까지만(넘치면 남은 만큼만)', () => {
@@ -414,3 +454,5 @@ test('index.html의 무기 막대가 무기표와 같다(번호·이름·아이�
 });
 
 // ---------- (차량 모듈이 carstep 검사를 여기 아래에 덧붙인다) ----------
+// 자동차 움직임(carstep.js) 검사는 따로 node tools/test-carstep.mjs로도 돌릴 수 있다. 실패하면 이 실행의 종료 코드도 1이 된다.
+await import('./test-carstep.mjs');

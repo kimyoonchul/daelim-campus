@@ -183,9 +183,23 @@ export function createMayhem({ engine, world, player, cam, input, ui, net, remot
     return true;
   }
 
+  /** 들이받기처럼 무기 공격이 아닌 전투: 공격 횟수·겨냥점·동작은 그대로 두고 전투 잠금과 회복 대기만 갱신한다 */
+  function touchLock() {
+    if (state.wpn === 0 || state.ko) return false;
+    state.lockUntil = engine.time + LIMITS.lockSec;
+    lastCombat = engine.time;
+    return true;
+  }
+
   const bossName = (by) => {
     for (let i = 0; i < targets.length; i++) if (targets[i].id === by) return targets[i].name || '보스';
-    return '';
+    // 보스는 가까이 있을 때만 과녁 목록에 오른다: 멀리 있는 보스 이름은 보스 모듈에 묻는다
+    try {
+      const bm = mayhem.boss;
+      return bm && typeof bm.nameOf === 'function' ? String(bm.nameOf(by) || '') : '';
+    } catch (e) {
+      return '';
+    }
   };
   // 기절한 까닭을 한 구절로: "…님의 대포에 맞고", "…님의 차에 받혀". 알 수 없으면 빈 문자열
   function koReason(by, w, killerName) {
@@ -624,6 +638,7 @@ export function createMayhem({ engine, world, player, cam, input, ui, net, remot
     locked,
     lockLeft,
     bumpAtk,
+    touchLock,
     hurt,
     claimHit,
     claimBoss,

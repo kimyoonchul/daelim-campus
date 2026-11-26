@@ -1,5 +1,5 @@
 // 전역 설정값
-export const VERSION = '1.0.1';
+export const VERSION = '1.1.0';
 
 // 주소에 ?room=이름 을 붙이면 그 이름을 아는 사람끼리만 만나는 방이 된다(영소문자·숫자 16자 이내).
 function roomFromUrl() {
