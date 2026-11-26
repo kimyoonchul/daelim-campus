@@ -67,6 +67,19 @@ export function createEngine(canvas) {
   scene.add(sun);
   scene.add(sun.target);
 
+  // 섬광용 점 조명 2개(폭발이 번쩍일 때 mayhem/gfx.js가 돌려 쓴다).
+  // 조명 수가 바뀌면 모든 재질의 셰이더를 다시 만들어야 하므로 처음부터 넣어 두고 밝기(intensity)만 바꾼다 — visible은 건드리지 않는다.
+  // 저사양에서는 만들지 않는다(빈 배열).
+  const flashLights = [];
+  if (!quality.low) {
+    for (let i = 0; i < 2; i++) {
+      const l = new THREE.PointLight(0xffc27a, 0, 70, 2);
+      l.position.set(0, -500, 0);
+      scene.add(l);
+      flashLights.push(l);
+    }
+  }
+
   const sunDir = new THREE.Vector3(-0.55, 0.78, 0.45).normalize();
   const state = { time: 'day', night: 0 };
   const nightListeners = [];
@@ -119,6 +132,7 @@ export function createEngine(canvas) {
     camera,
     sun,
     hemi,
+    flashLights,
     quality,
     state,
     hold: false, // true면 시간 정지(디버그용). tick()으로 수동 진행.

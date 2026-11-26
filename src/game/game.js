@@ -157,10 +157,12 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
   }
 
   function showPlayers() {
+    // 난투 기록(이번 접속 동안 기절시킨·기절한 횟수)이 있으면 덧붙인다
+    const score = (id) => (game.mayhem && typeof game.mayhem.scoreLine === 'function' ? game.mayhem.scoreLine(id) : '');
     const rows = [
       el('li', {}, [
         el('span', { class: 'dot', style: `background:${profile.col}` }),
-        el('div', { class: 'who' }, [el('b', { text: profile.n + ' (나)' }), el('small', { text: tagLine(profile) || '손님' })]),
+        el('div', { class: 'who' }, [el('b', { text: profile.n + ' (나)' }), el('small', { text: [tagLine(profile) || '손님', score(net.id)].filter(Boolean).join(' · ') })]),
       ]),
     ];
     for (const r of remotes.list()) {
@@ -169,7 +171,7 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
       rows.push(
         el('li', {}, [
           el('span', { class: 'dot', style: `background:${p.col}` }),
-          el('div', { class: 'who' }, [el('b', { text: p.n }), el('small', { text: [tagLine(p), where, p.t ? `“${p.t}”` : ''].filter(Boolean).join(' · ') })]),
+          el('div', { class: 'who' }, [el('b', { text: p.n }), el('small', { text: [tagLine(p), where, score(r.id), p.t ? `“${p.t}”` : ''].filter(Boolean).join(' · ') })]),
           el('button', { text: '프로필', onclick: () => showProfile(r) }),
         ]),
       );
@@ -181,10 +183,26 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
     ]);
   }
 
+  const markerFns = []; // game.addMapMarker로 등록한 함수들(보스 위치 등)
+  let markerWarned = false;
   const mapMarkers = () => {
     const m = [];
     if (player.zone === 'campus') for (const s of signs) if (!stamps[s.key]) m.push({ x: s.x, z: s.z, color: '#ffd23f', r: 6 });
     if (climb.state === 'run' && anchors.climbGoal) m.push({ x: anchors.climbGoal.x, z: anchors.climbGoal.z, color: '#2fbf71', r: 10 });
+    // 다른 모듈이 더 찍어 달라고 한 점: 함수마다 [{ x, z, color, r }]를 돌려준다
+    for (const fn of markerFns) {
+      let extra = null;
+      try {
+        extra = fn();
+      } catch (e) {
+        if (!markerWarned) {
+          markerWarned = true;
+          console.error('지도 표시 함수에서 오류가 났어요', e);
+        }
+      }
+      if (!Array.isArray(extra)) continue;
+      for (const k of extra) if (k && Number.isFinite(k.x) && Number.isFinite(k.z) && typeof k.color === 'string') m.push(k);
+    }
     return m;
   };
   const mapOthers = () => remotes.list().filter((r) => r.zone === 'campus').map((r) => ({ x: r.x, z: r.z, color: r.avatar.profile.col }));
@@ -301,7 +319,19 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
   }
   function startClimb() {
     ui.panel.close();
+    // 차에 탄 채로·기절한 채로·전투 잠금 중에는 시작할 수 없다. 시작하면 무기를 넣는다(타임어택 중에는 평화).
+    const mh = game.mayhem;
+    if (player.mount) {
+      ui.toast('🚗 차에서 내린 뒤에 시작할 수 있어요');
+      return;
+    }
+    if (mh && mh.isFrozen()) return;
+    if (mh && mh.locked()) {
+      ui.toast(`⚔️ 전투 중에는 시작할 수 없어요 (${mh.lockLeft()}초 뒤)`);
+      return;
+    }
     cancelClimb();
+    if (mh) mh.forcePeace();
     const s = anchors.climbStart;
     player.place('campus', s.x + 1.6, s.z + 1.2, Math.PI);
     climb.state = 'count';
@@ -396,6 +426,12 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
   for (const s of signs) addI('campus', s.x, s.z, 3.0, `${s.name} 안내 보기`, () => showBuilding(s.key));
   if (jsDoor) {
     addI('campus', jsDoor.x, jsDoor.z, 2.8, '전산관 들어가기', () => {
+      // 실내는 안전 구역이다. 싸우다 말고 뛰어들어 피하지 못하게, 전투 잠금 중에는 들여보내지 않는다.
+      const mh = game.mayhem;
+      if (mh && mh.locked()) {
+        ui.toast(`⚔️ 전투 중에는 들어갈 수 없어요 (${mh.lockLeft()}초 뒤)`);
+        return;
+      }
       sfx.door();
       savedCam = { pitch: cam.pitch, dist: cam.dist, yaw: cam.yaw };
       const z = world.zones.js4;
@@ -479,12 +515,14 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
   }
 
   // ---------- 통신 이벤트 ----------
+  // 다른 사람의 이벤트로 채팅창에 찍는 줄은 ui.feed를 거친다(전체 기준 빈도 제한 + 숨긴 사람 거르기).
+  if (typeof ui.setMutedCheck === 'function') ui.setMutedCheck((id) => store.data.muted.includes(id));
   const peerFw = new Map();
   net.on('event', (id, msg, peer) => {
     const name = peer.profile.n;
     if (msg.k === 'rec' && Number.isFinite(msg.t) && msg.t >= 15000 && msg.t <= 3600000) {
-      records.set(id, { n: name, t: msg.t });
-      ui.chat.system(`🏃 ${name} 님이 등굣길을 ${fmtTime(msg.t)}에 주파했어요!`);
+      if (records.size < 200 || records.has(id)) records.set(id, { n: name, t: msg.t });
+      ui.feed(`🏃 ${name} 님이 등굣길을 ${fmtTime(msg.t)}에 주파했어요!`, id);
     } else if (msg.k === 'fw' && Number.isFinite(msg.x) && Number.isFinite(msg.z)) {
       const now = performance.now();
       if (now - (peerFw.get(id) || 0) < 3500) return;
@@ -492,8 +530,8 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
       const x = Math.max(-300, Math.min(300, msg.x));
       const z = Math.max(-300, Math.min(300, msg.z));
       fx.firework(x, heightAt(x, z), z);
-    } else if (msg.k === 'grad') ui.chat.system(`🎓 ${name} 님이 스탬프 투어를 완주했어요!`);
-    else if (msg.k === 'quiz' && Number.isFinite(msg.s)) ui.chat.system(`🧠 ${name} 님이 지공모 퀴즈에서 ${Math.max(0, Math.min(8, msg.s | 0))}점을 받았어요`);
+    } else if (msg.k === 'grad') ui.feed(`🎓 ${name} 님이 스탬프 투어를 완주했어요!`, id);
+    else if (msg.k === 'quiz' && Number.isFinite(msg.s)) ui.feed(`🧠 ${name} 님이 지공모 퀴즈에서 ${Math.max(0, Math.min(8, msg.s | 0))}점을 받았어요`, id);
   });
   net.on('chat', (id) => {
     if (!store.data.muted.includes(id)) sfx.chat();
@@ -597,6 +635,25 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
     coins,
     interactables,
     showBuilding,
+    mayhem: null, // 난투 모듈. main.js가 만든 뒤에 넣으므로 쓸 때마다 있는지 확인한다
+    /** 타임어택 중인가(카운트다운 포함) */
+    climbActive: () => climb.state !== 'idle',
+    /** 진행 중인 타임어택을 취소한다(진행 중이 아니면 아무 일도 없다). msg를 주면 알림으로 띄운다 */
+    cancelClimb(msg) {
+      if (climb.state !== 'idle') cancelClimb(msg);
+    },
+    /** A+를 n개 더한다(보스 보상 등) */
+    addGrades(n) {
+      n = Math.floor(n);
+      if (!(n > 0) || n > 1000) return;
+      store.data.grades = (store.data.grades || 0) + n;
+      store.save();
+      refreshStats();
+    },
+    /** 지도에 점을 더 찍는다: fn()이 [{ x, z, color, r }]를 돌려주면 미니맵과 전체 지도에 합친다 */
+    addMapMarker(fn) {
+      if (typeof fn === 'function' && !markerFns.includes(fn)) markerFns.push(fn);
+    },
     start() {
       refreshRings();
       refreshStats();
@@ -657,7 +714,8 @@ export function createGame({ engine, world, player, cam, input, ui, net, remotes
       if (frame % 4 === 0) {
         let best = null;
         let bd = Infinity;
-        if (!ui.panel.isOpen() && climb.state !== 'count') {
+        const down = !!(game.mayhem && game.mayhem.isFrozen()); // 기절해 있는 동안에는 아무것도 못 한다
+        if (!ui.panel.isOpen() && climb.state !== 'count' && !down) {
           for (const it of interactables) {
             if (it.zone !== player.zone) continue;
             const d = Math.hypot(it.x - px, it.z - pz);

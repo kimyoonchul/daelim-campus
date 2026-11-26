@@ -208,3 +208,107 @@ body.touch #timer { top: calc(150px + var(--safe-t)); font-size: 21px; }
   #chatlog { max-height: 70px; }
   #minimap { width: 96px; height: 96px; }
 }
+
+/* ---------- 난투 HUD: 체력·무기 막대·차량 계기·보스 ---------- */
+/* 계속 바뀌는 3D 화면 위에 뜨므로 backdrop-filter는 쓰지 않는다. 표시 전용 요소는 입력을 받지 않고, 무기 막대는 버튼만 받는다. */
+#hp, #carhud, #bossbar, #weapons { pointer-events: none !important; }
+#hp .track, #carhud .track, #bossbar .track { overflow: hidden; border-radius: 99px; background: rgba(0, 0, 0, 0.5); }
+#hp .track i, #carhud .track i, #bossbar .track i { display: block; width: 100%; height: 100%; border-radius: 99px; transition: width 0.15s; }
+
+/* 난투 체력: 체력(스태미나) 막대와 같은 폭으로 그 위에. PC는 감정표현 줄(위 끝 52px)과 안내 문구(아래 끝 64px) 사이에 둔다. 하트와 숫자는 막대 오른쪽 바깥. */
+#hp { position: absolute; left: 50%; bottom: calc(54px + var(--safe-b)); transform: translateX(-50%); width: 190px; height: 8px; }
+#hp .track { width: 100%; height: 100%; border: 1px solid var(--line); }
+#hp .track i { background: linear-gradient(90deg, #ff4d6d, #ff9a76); }
+#hp b { position: absolute; left: calc(100% + 6px); top: 0; font: 700 11px/8px var(--body); color: #ffe1e6; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); white-space: nowrap; }
+#hp b::before { content: '♥'; margin-right: 3px; color: #ff6b81; }
+#hp.low .track i { background: #ff3b3b; animation: hpLow 0.5s infinite alternate; }
+@keyframes hpLow { to { opacity: 0.4; } }
+/* 폭 934px 미만인 PC 창에서는 막대 왼쪽 끝이 채팅 입력 줄(위 끝 55.2px) 위에 오므로 2px 올리고 그만큼 얇게 한다(터치 화면은 아래 규칙이 덮어쓴다). */
+@media (max-width: 939px) { #hp { bottom: calc(56px + var(--safe-b)); height: 6px; } #hp b { line-height: 6px; } }
+
+/* 무기 막대: PC는 오른쪽 아래. 고른 칸은 노란 테두리, 쿨다운은 칸을 아래에서부터 덮는 반투명 막(scaleY = 남은 비율)으로 보여 준다. */
+#weapons { position: absolute; right: 12px; bottom: calc(12px + var(--safe-b)); display: flex; gap: 5px; }
+#weapons button { pointer-events: auto; position: relative; flex: 0 0 auto; width: 44px; height: 44px; padding: 0; overflow: hidden; border-radius: 12px; border: 1px solid var(--line); background: var(--glass2); font-size: 22px; line-height: 1; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+@media (hover: hover) { #weapons button:hover { background: rgba(0, 159, 227, 0.55); } }
+#weapons button.on { border-color: var(--yellow); background: rgba(92, 76, 20, 0.92); box-shadow: 0 0 0 2px var(--yellow), 0 4px 14px rgba(0, 0, 0, 0.4); }
+#weapons button i, #bWpn i { position: absolute; inset: 0; background: rgba(6, 10, 18, 0.68); transform: scaleY(0); transform-origin: 50% 100%; pointer-events: none; }
+#wpnName { position: absolute; right: 0; bottom: calc(100% + 6px); display: flex; align-items: center; gap: 6px; padding: 2px 10px 2px 3px; border-radius: 99px; background: var(--glass2); border: 1px solid var(--line); font: 14px/18px var(--head); white-space: nowrap; }
+#wpnName kbd { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 6px; background: var(--yellow); color: #111; font: 700 11px var(--body); }
+/* 무기를 들고 있는 동안에는 공격 키도 알려 준다 */
+#wpnName .atk { display: none; align-items: center; gap: 6px; margin-left: 4px; }
+#hud.armed #wpnName .atk { display: flex; }
+
+/* 차량 계기(속도·내구도): 탑승 중에는 무기 막대 자리를 대신 쓴다. */
+#carhud { position: absolute; right: 12px; bottom: calc(12px + var(--safe-b)); display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px 0 10px; overflow: hidden; border-radius: 14px; background: var(--glass2); border: 1px solid var(--line); font: 20px/1 var(--head); white-space: nowrap; }
+#carhud b { min-width: 2ch; text-align: right; font-weight: normal; color: var(--yellow); }
+#carhud small { margin-left: -4px; font: 11px/1 var(--body); color: var(--muted); }
+#carhud .track { flex: 1 1 70px; min-width: 0; height: 8px; border: 1px solid var(--line); }
+#carhud .track i { background: linear-gradient(90deg, #6fd3ff, #d4f3ff); }
+#carhud.low .track i { background: #ff5d5d; }
+#hud.has-car #weapons { display: none; }
+/* 좁은 PC 창에서는 오른쪽 아래가 감정표현 줄(x 384~654, 높이 620px 이상에서만 보임)과 겹치므로 안내 문구(위 끝 116px) 위로 올린다.
+   폭 780px 미만이면 창 높이와 상관없이 가운데 체력 숫자(오른쪽 끝 = 50% + 135px)에 닿으므로 마찬가지로 올린다. */
+@media (max-width: 939px) and (min-height: 620px), (max-width: 779px) { #weapons, #carhud { bottom: calc(120px + var(--safe-b)); } }
+/* 폭 624px 미만이면 채팅(오른쪽 끝 372px)에 닿으므로 채팅 기록(위 끝 250px) 위로 올린다. */
+@media (max-width: 623px) and (min-height: 600px) { #weapons, #carhud { bottom: calc(256px + var(--safe-b)); } }
+
+/* 보스 체력: 타임어택 시계 자리를 쓴다(둘은 함께 뜨지 않는다 — 타임어택 중에는 ui.js가 숨긴다). */
+#bossbar { position: absolute; left: 50%; top: calc(58px + var(--safe-t)); transform: translateX(-50%); width: min(320px, calc(100vw - 260px)); height: 40px; padding: 4px 12px 0; border-radius: 12px; background: var(--glass2); border: 1px solid rgba(255, 120, 120, 0.5); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); text-align: center; }
+#bossbar b { display: block; overflow: hidden; font: normal 15px/18px var(--head); color: #ffdcdc; white-space: nowrap; text-overflow: ellipsis; }
+#bossbar .track { height: 9px; margin-top: 3px; }
+#bossbar .track i { background: linear-gradient(90deg, #d63031, #ff7675); transition: width 0.2s; }
+/* PC: 보스 막대(아래 끝 98px)가 떠 있는 동안 큰 알림(배너, 높이 최대 129px)은 그 아래로 내린다. 창 높이 717px 이상이면 원래 자리 그대로다. */
+body:not(.touch) #hud.has-boss #banner { top: max(24%, 172px); }
+@media (max-width: 720px) { body:not(.touch) #hud.has-boss #banner { top: max(30%, 172px); } }
+
+/* ---------- 난투 HUD: 터치 ---------- */
+/* 세로 화면, 아래에서부터: 체력 22~31 · 난투 체력 36~46 · 무기 띠(차량 계기) 50~84 · 조이스틱 86~ · 공격/점프 92~ */
+body.touch #hp { bottom: calc(36px + var(--safe-b)); width: 150px; height: 10px; }
+body.touch #hp b { line-height: 10px; }
+body.touch #weapons { right: auto; left: 50%; bottom: calc(50px + var(--safe-b)); transform: translateX(-50%); gap: 4px; }
+body.touch #weapons button { width: 34px; height: 34px; border-radius: 10px; font-size: 18px; }
+body.touch #weapons button.on { box-shadow: inset 0 0 0 2px var(--yellow); }
+body.touch #wpnName { display: none; }
+body.touch #carhud { right: auto; left: 50%; bottom: calc(50px + var(--safe-b)); transform: translateX(-50%); height: 34px; padding: 0 12px 0 8px; font-size: 17px; }
+/* 보스 막대는 채팅 아래 왼쪽(오른쪽은 메뉴가 화면 오른쪽 끝에서 132px까지 차지한다). 보이는 동안 알림은 그 아래로. */
+body.touch #bossbar { left: 10px; top: calc(196px + var(--safe-t)); transform: none; width: calc(100vw - 148px); max-width: 420px; }
+body.touch #hud.has-boss #toasts { top: calc(240px + var(--safe-t)); }
+/* 내려간 알림 줄이 낮은 화면(높이 640px)에서 무기 버튼에 닿지 않게, 보스 막대가 있는 동안은 최근 3개만 보인다. */
+body.touch #hud.has-boss #toasts .toast:nth-last-child(n+4) { display: none; }
+/* 높이 700px 미만이면 세 번째 줄(아래 끝 365px)이 안내 문구(위 끝 = 화면 아래에서 308px)에 닿으므로 2개만 보인다. */
+@media (max-height: 699px) { body.touch #hud.has-boss #toasts .toast:nth-last-child(n+3) { display: none; } }
+/* 터치 화면은 배너를 내릴 자리가 없으므로(아래에 안내 문구·버튼), 배너가 떠 있는 동안에는 보스 막대를 잠깐 감춘다. */
+body.touch #banner:not(.hidden) ~ #bossbar { visibility: hidden; }
+/* 공격은 점프 왼쪽, 무기는 달리기 왼쪽. 크기·오른쪽 여백은 #touch button(72px, right 18px)을 덮어쓴다. */
+#bAtk { bottom: calc(92px + var(--safe-b)); }
+#bWpn { bottom: calc(176px + var(--safe-b)); }
+#touch #bAtk { right: 96px; opacity: 0.55; }
+#touch #bWpn { right: 164px; width: 62px; height: 62px; padding: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+#bWpn span { font-size: 24px; }
+#bWpn small { margin-top: 3px; font-size: 11px; opacity: 0.85; }
+/* 누르고 있는 버튼: 길게 눌러도 화면이 밀리거나 글자가 선택되지 않게 */
+#touch #bAtk, #touch #bJump { touch-action: none; }
+#touch #bAtk, #touch #bJump, #touch #bWpn { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* 공격 버튼: 평화일 때는 흐리게, 무기를 들면 빨갛게, 운전 중에는 경적(노랑) */
+#hud.armed #bAtk { opacity: 1; background: rgba(226, 74, 60, 0.8); border-color: rgba(255, 255, 255, 0.75); }
+#hud.has-car #bAtk { opacity: 1; background: rgba(255, 210, 63, 0.88); border-color: rgba(255, 255, 255, 0.75); color: #111; }
+#hud.has-car #bJump { font-size: 14px; }
+@media (orientation: landscape) and (max-height: 500px) {
+  /* 가로 화면, 아래에서부터: 안내 18~60 · 체력 64~73 · 난투 체력 77~87 · (탑승 중) 차량 계기 77~101, 난투 체력과 함께면 91~115 */
+  body.touch #bAtk { bottom: calc(26px + var(--safe-b)); }
+  body.touch #bWpn { bottom: calc(108px + var(--safe-b)); }
+  body.touch #weapons { display: none; }
+  body.touch #hp { bottom: calc(77px + var(--safe-b)); }
+  /* 폭 제한: 난투 체력 위로 올라가면 무기 버튼(왼쪽 끝 = 100vw - 226px)과 높이가 겹치므로 가로로 6px 이상 띄운다 */
+  body.touch #carhud { bottom: calc(77px + var(--safe-b)); width: min(176px, calc(100vw - 464px)); height: 24px; gap: 5px; padding: 0 10px 0 6px; font-size: 14px; }
+  body.touch #carhud small { margin-left: -2px; font-size: 10px; }
+  body.touch #hud.has-hp #carhud { bottom: calc(91px + var(--safe-b)); }
+  /* 채팅(왼쪽, 폭 min(300px, 38vw))과 미니맵 사이 가운데 */
+  body.touch #bossbar { left: 50%; top: calc(52px + var(--safe-t)); transform: translateX(-50%); width: min(180px, calc(100vw - 2 * min(300px, 38vw) - 32px)); max-width: none; }
+  body.touch #hud.has-boss #toasts { top: calc(96px + var(--safe-t)); }
+  /* 알림 줄이 무기 버튼(위 끝 = 화면 아래에서 170px)까지 내려오지 않게 최근 3개만, 보스 막대가 있으면 2개만 보인다 */
+  body.touch #toasts .toast:nth-last-child(n+4) { display: none; }
+  body.touch #hud.has-boss #toasts .toast:nth-last-child(n+3) { display: none; }
+}
+/* 폭 360px 미만 세로 화면은 무기 버튼이 조이스틱에 닿으므로(둥근 테두리 사이 간격: 360px에서 7px, 350px에서 0) 아래 무기 띠만 쓴다. */
+@media (orientation: portrait) and (max-width: 359px) { #touch #bWpn { display: none; } }

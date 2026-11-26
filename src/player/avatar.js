@@ -1,4 +1,5 @@
 // 아바타: 과잠(학과 점퍼)을 입은 로우폴리 캐릭터. 걷기·달리기·점프·감정표현 동작과 이름표·말풍선.
+// 난투용으로 장난감 무기·공격 동작·기절(머리 위 별)·맞았을 때 번쩍임·체력 막대도 여기서 그린다.
 import * as THREE from 'three';
 import { Geo } from '../world/geom.js';
 import { textTexture } from '../world/textures.js';
@@ -29,6 +30,111 @@ const G = {
   capBase: new THREE.CylinderGeometry(0.2, 0.23, 0.12, 12),
   tassel: new Geo().box(0, -0.09, 0, 0.03, 0.18, 0.03).build(),
 };
+
+// ----- 난투 소품 -----
+// 아래 재질과 지오메트리는 모든 아바타가 함께 쓴다. 아바타의 dispose()에서 지우면 안 된다.
+const ATK_DUR = 0.28; // 공격 동작 길이(초)
+const FLASH_DUR = 0.15; // 맞았을 때 번쩍이는 길이(초)
+const HP_FULL = 100; // 체력 막대가 가득 찼을 때의 값(mayhem/rules.js의 MAX_HP와 같은 값)
+const HP_W = 0.9; // 체력 막대 크기(m)
+const HP_H = 0.09;
+const TOY = new THREE.MeshLambertMaterial({ vertexColors: true });
+const STAR = new THREE.MeshBasicMaterial({ color: 0xffd84a, toneMapped: false });
+const HP_BACK = new THREE.SpriteMaterial({ color: 0x121a28, transparent: true, opacity: 0.82, depthWrite: false, toneMapped: false, fog: false });
+// 체력이 줄수록 빨강 ← 노랑 ← 초록
+const HP_FILL = [0xff5a5a, 0xffc93c, 0x3ddc84].map((color) => new THREE.SpriteMaterial({ color, transparent: true, depthWrite: false, toneMapped: false, fog: false }));
+
+/** 색을 입힌 도형 여러 개를 지오메트리 하나로 합친다(정점 색) — 소품 하나를 한 번에 그리려고 */
+function fuse(parts) {
+  const pos = [];
+  const nor = [];
+  const col = [];
+  const idx = [];
+  const c = new THREE.Color();
+  for (const [g, hex] of parts) {
+    const base = pos.length / 3;
+    const p = g.attributes.position;
+    const n = g.attributes.normal;
+    c.set(hex);
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      col.push(c.r, c.g, c.b);
+    }
+    if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(base + g.index.getX(i));
+    else for (let i = 0; i < p.count; i++) idx.push(base + i);
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.setIndex(idx);
+  out.computeBoundingSphere();
+  return out;
+}
+const boxAt = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+/** y축을 따라 선 원통(가운데 높이 y) */
+const cylAt = (rTop, rBottom, h, y, seg = 12, open = false) => new THREE.CylinderGeometry(rTop, rBottom, h, seg, 1, open).translate(0, y, 0);
+
+/** 물총: 오른팔에 붙인다. 팔 좌표계에서 손끝 쪽이 -y, 팔을 앞으로 뻗었을 때 위쪽이 +z */
+function squirtGeo() {
+  return fuse([
+    [boxAt(0.11, 0.42, 0.13, 0, -0.66, 0.085), 0x2196f3], // 몸통
+    [boxAt(0.15, 0.2, 0.14, 0, -0.56, 0.21), 0xffd23f], // 물탱크
+    [boxAt(0.07, 0.07, 0.05, 0, -0.56, 0.3), 0xff8a3d], // 탱크 마개
+    [boxAt(0.065, 0.1, 0.065, 0, -0.91, 0.085), 0xffd23f], // 총구
+    [boxAt(0.06, 0.09, 0.1, 0, -0.64, -0.02), 0xffd23f], // 방아쇠
+  ]);
+}
+
+/** 폭죽 통: 오른 어깨에 멘다(몸통 좌표계, 앞이 +z). 빨강·흰 줄무늬 */
+function tubeGeo() {
+  const parts = [];
+  const n = 6;
+  const len = 0.17;
+  for (let i = 0; i < n; i++) parts.push([cylAt(0.105, 0.105, len, (i - (n - 1) / 2) * len, 12, true), i % 2 ? 0xf5f3ee : 0xe5383b]);
+  const half = (n * len) / 2;
+  parts.push([cylAt(0.125, 0.125, 0.05, half + 0.02), 0xf2c230]); // 앞뒤 금테(통 끝을 막는다)
+  parts.push([cylAt(0.125, 0.125, 0.05, -half - 0.02), 0xf2c230]);
+  parts.push([new THREE.ConeGeometry(0.08, 0.2, 10).translate(0, half + 0.14, 0), 0xffd23f]); // 장전된 폭죽 머리
+  return fuse(parts).rotateX(Math.PI / 2).translate(0.37, 0.7, 0.1);
+}
+
+/** 대포: 오른 어깨에 멘다. 장난감처럼 큼직한 진회색 원통 */
+function cannonGeo() {
+  return fuse([
+    [cylAt(0.2, 0.235, 1.0, 0, 14), 0x3d424b], // 포신(앞이 조금 가늘다)
+    [cylAt(0.255, 0.255, 0.14, 0.5, 14), 0x2a2d34], // 포구 테
+    [cylAt(0.15, 0.15, 0.02, 0.572, 14), 0x08090b], // 포구 안쪽
+    [cylAt(0.245, 0.245, 0.09, -0.12, 14), 0x2a2d34], // 가운데 띠
+    [new THREE.SphereGeometry(0.235, 14, 8).translate(0, -0.5, 0), 0x3d424b], // 둥근 뒤쪽
+    [new THREE.SphereGeometry(0.075, 10, 6).translate(0, -0.78, 0), 0xf2c230], // 뒤 꼭지
+  ])
+    .rotateX(Math.PI / 2)
+    .translate(0.52, 0.8, 0.12);
+}
+
+/** 기절했을 때 머리 위를 도는 별 */
+function starGeo() {
+  const s = new THREE.Shape();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 ? 0.06 : 0.14;
+    const a = (i / 10) * Math.PI * 2 + Math.PI / 2;
+    if (i) s.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    else s.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  s.closePath();
+  return new THREE.ExtrudeGeometry(s, { depth: 0.05, bevelEnabled: false }).translate(0, 0, -0.025);
+}
+
+// 처음 쓰일 때 한 번만 만든다(무기 번호 2 물총, 3 폭죽 통, 4 대포)
+const GEAR_MAKERS = [null, null, squirtGeo, tubeGeo, cannonGeo];
+const gearGeos = [];
+const gearGeo = (w) => gearGeos[w] || (gearGeos[w] = GEAR_MAKERS[w]());
+let starGeoCache = null;
+/** 무기 번호를 0(평화)~4 정수로 맞춘다. 그 밖의 값은 0 */
+const weaponId = (w) => (w >= 1 && w <= 4 ? Math.floor(w) : 0);
 
 function hashStr(s) {
   let h = 2166136261;
@@ -182,6 +288,17 @@ export class Avatar {
     this.speed = 0;
     this.t = (hashStr(id || 'x') % 100) / 10;
     this.jacket = new THREE.MeshLambertMaterial({ color: 0x2e86de });
+    // 난투 상태(무기·공격 동작·기절·번쩍임·체력 막대). 메시는 처음 쓰일 때 만든다.
+    this.wpn = 0; // 들고 있는 무기(0 평화, 1 주먹, 2 물총, 3 폭죽 통, 4 대포)
+    this.gear = [null, null, null, null, null]; // 무기 번호별 메시
+    this.atkT = 0; // 공격 동작이 끝나기까지 남은 시간(초)
+    this.atkW = 0; // 그 동작의 무기 번호
+    this.ko = false;
+    this.stars = null;
+    this.flashT = 0;
+    this.hp = null; // 체력 막대에 보이는 비율(0~1). null이면 막대를 숨긴 상태
+    this.hpBar = null;
+    this.hpFill = null;
     this._build(id);
     this.setProfile(profile || {});
   }
@@ -260,14 +377,25 @@ export class Avatar {
     this.group.add(this.tag);
     this.cap.visible = !!p.g;
     if (p.g) this.tag.position.y += 0.16;
+    this._layout();
+  }
+
+  /** 이름표 위에 얹는 것들의 높이를 맞춘다: 이름표 → (체력 막대) → 말풍선 */
+  _layout() {
+    let top = this.tag.position.y + this.tag.userData.h / 2;
+    if (this.hpBar && this.hpBar.visible) {
+      this.hpBar.position.y = top + 0.12;
+      top += 0.19;
+    }
+    if (this.bubble) this.bubble.position.y = top + this.bubble.userData.h / 2 + 0.06;
   }
 
   say(text) {
     this.clearBubble();
     this.bubble = makeBubble(text);
-    this.bubble.position.y = this.tag.position.y + this.tag.userData.h / 2 + this.bubble.userData.h / 2 + 0.06;
     this.bubbleT = Math.min(9, 3.5 + text.length * 0.09);
     this.group.add(this.bubble);
+    this._layout();
   }
 
   clearBubble() {
@@ -283,17 +411,108 @@ export class Avatar {
     this.emoteT = 0;
   }
 
+  /** 든 무기를 바꾼다(0 평화, 1 주먹은 맨손 · 2 물총은 오른손 · 3 폭죽 통과 4 대포는 오른 어깨) */
+  setWeapon(w) {
+    w = weaponId(w);
+    if (w === this.wpn) return;
+    const old = this.gear[this.wpn];
+    if (old) old.visible = false;
+    this.wpn = w;
+    if (w < 2) return;
+    let m = this.gear[w];
+    if (!m) {
+      m = this.gear[w] = new THREE.Mesh(gearGeo(w), TOY);
+      m.castShadow = true;
+      (w === 2 ? this.armR : this.torso).add(m);
+    }
+    m.position.set(0, 0, 0);
+    m.visible = true;
+  }
+
+  /** 공격 동작 한 번(0.28초): 주먹은 잽, 나머지는 발사 반동. w를 생략하면 지금 든 무기 */
+  attack(w = this.wpn) {
+    w = weaponId(w);
+    if (!w || this.ko) return;
+    this.atkW = w;
+    this.atkT = ATK_DUR;
+    this.emote = 0; // 움직일 때처럼 감정표현은 풀린다
+  }
+
+  /** 기절: 뒤로 눕고 머리 위에 별이 돈다. false면 다시 일어난다 */
+  setKO(on) {
+    on = !!on;
+    if (on === this.ko) return;
+    this.ko = on;
+    if (on) {
+      this.emote = 0;
+      this.atkT = 0;
+      if (!this.stars) {
+        if (!starGeoCache) starGeoCache = starGeo();
+        this.stars = new THREE.Group();
+        for (let i = 0; i < 3; i++) this.stars.add(new THREE.Mesh(starGeoCache, STAR));
+        this.group.add(this.stars);
+      }
+    }
+    if (this.stars) this.stars.visible = on;
+  }
+
+  /** 맞았을 때 0.15초 번쩍인다(이 아바타의 자켓 재질만 밝힌다) */
+  flash() {
+    this.flashT = FLASH_DUR;
+    this.jacket.emissive.setScalar(0.9);
+  }
+
+  /** 이름표 위의 얇은 체력 막대. v가 null이면 숨긴다(max는 가득 찼을 때의 값) */
+  setHP(v, max = HP_FULL) {
+    if (v == null) {
+      if (this.hp === null) return;
+      this.hp = null;
+      this.hpBar.visible = false;
+      this._layout();
+      return;
+    }
+    let k = v / max;
+    k = k > 0 ? Math.min(1, k) : 0; // 음수·NaN은 0으로
+    if (k === this.hp) return;
+    if (!this.hpBar) {
+      // 단색 판 2장(바탕 + 채움). 스프라이트라 늘 화면을 향하고, 같은 자리에 있어 만든 순서(바탕 먼저)대로 그려진다.
+      const back = new THREE.Sprite(HP_BACK);
+      back.scale.set(HP_W + 0.05, HP_H + 0.05, 1);
+      this.hpFill = new THREE.Sprite(HP_FILL[2]);
+      this.hpFill.scale.set(HP_W, HP_H, 1);
+      this.hpBar = new THREE.Group();
+      this.hpBar.add(back, this.hpFill);
+      this.hpBar.visible = false;
+      this.group.add(this.hpBar);
+    }
+    const fill = this.hpFill;
+    fill.visible = k > 0.004;
+    if (fill.visible) {
+      // 길이는 scale.x로. center.x를 같이 옮겨 화면에서 왼쪽 끝이 고정되게 한다(스프라이트는 center 기준으로 늘어난다).
+      fill.scale.x = HP_W * k;
+      fill.center.x = 0.5 / k;
+      fill.material = HP_FILL[k > 0.5 ? 2 : k > 0.25 ? 1 : 0];
+    }
+    const wasHidden = this.hp === null;
+    this.hp = k;
+    if (wasHidden) {
+      this.hpBar.visible = true;
+      this._layout();
+    }
+  }
+
   /** dt 동안의 이동 거리(moved), 속도, 공중 여부로 동작을 갱신한다 */
   update(dt, moved, speed, air) {
     this.t += dt;
     this.speed = speed;
     const t = this.t;
+    const ko = this.ko;
     const run = speed > 5.6;
-    if (moved > 0.0005) {
+    if (moved > 0.0005 && !ko) {
       this.phase += moved * (run ? 2.6 : 3.6);
       if (this.emote) this.emote = 0;
     }
-    const k = Math.min(1, speed / 2.2); // 걷는 정도
+    const k = ko ? 0 : Math.min(1, speed / 2.2); // 걷는 정도
     const amp = (run ? 1.0 : 0.62) * k;
     const s = Math.sin(this.phase);
     let legL = s * amp;
@@ -305,14 +524,27 @@ export class Avatar {
     let bodyY = Math.abs(Math.cos(this.phase)) * 0.05 * k;
     let lean = run ? 0.2 * k : 0.05 * k;
     let headX = 0;
+    let bodyRotX = 0;
     let bodyRotY = 0;
     let bodyRotZ = 0;
+    let bodyZ = 0;
+    let recoil = 0; // 어깨에 멘 무기가 반동으로 뒤로 밀리는 거리
     // 숨쉬기
     const breath = Math.sin(t * 2.1) * 0.012 * (1 - k);
     armLz += breath * 2;
     armRz -= breath * 2;
 
-    if (air) {
+    if (ko) {
+      // 기절: 뒤로 벌렁 누워 팔다리를 뻗는다(걷기·공중·감정표현 자세는 건너뛴다)
+      legL = 0.18;
+      legR = -0.1;
+      armL = armR = 0;
+      armLz = 1.25;
+      armRz = -1.25;
+      lean = 0;
+      bodyY = 0.22;
+      bodyRotX = -Math.PI / 2;
+    } else if (air) {
       legL = -0.5;
       legR = 0.35;
       armL = armR = -0.4;
@@ -359,22 +591,84 @@ export class Avatar {
       }
     }
 
+    const atk = !ko && this.atkT > 0;
+    if (!ko) {
+      // 무기를 든 자세. 감정표현 중에는 팔을 감정표현에 맡긴다.
+      const w = this.wpn;
+      if (w > 1 && !(this.emote && !air && speed < 0.3)) {
+        if (w === 2) armR = 0.5 + armR * 0.3; // 물총: 살짝 들고 덜 흔든다
+        else {
+          armR = 1.75; // 어깨에 멘 통을 오른손으로 받친다
+          armRz = w === 3 ? -0.09 : -0.41;
+        }
+      }
+      if (atk) {
+        const a = 1 - this.atkT / ATK_DUR; // 진행 0 → 1
+        const kick = Math.max(0, 1 - a * 2.5); // 쏜 직후 세고 금방 사라지는 반동
+        if (this.atkW === 1) {
+          // 주먹: 오른팔을 앞으로 쭉 뻗었다 거둔다(어깨도 같이 나간다)
+          const j = Math.sin(Math.pow(a, 0.6) * Math.PI);
+          armR += (1.55 - armR) * j;
+          armRz += (0.12 - armRz) * j;
+          bodyRotY -= 0.35 * j;
+          lean += 0.1 * j;
+        } else if (this.atkW === 2) {
+          // 물총: 팔을 앞으로 뻗어 겨누고 총구가 살짝 들린다
+          armR = 1.5 + 0.25 * kick;
+          armRz = 0;
+          lean -= 0.04 * kick;
+        } else {
+          // 폭죽 통·대포: 몸이 뒤로 젖혀지며 밀린다(대포가 더 세다)
+          const big = this.atkW === 4 ? 1.7 : 1;
+          lean -= 0.2 * big * kick;
+          bodyZ = -0.1 * big * kick;
+          recoil = 0.1 * big * kick;
+        }
+        this.atkT -= dt;
+      }
+    }
+
     const f = Math.min(1, dt * 16);
-    const L = (o, key, v) => {
-      o.rotation[key] += (v - o.rotation[key]) * f;
+    const fa = atk ? Math.min(1, dt * 40) : f; // 공격 동작은 더 날래게 따라간다
+    const L = (o, key, v, q = f) => {
+      o.rotation[key] += (v - o.rotation[key]) * q;
     };
     L(this.legL, 'x', -legL);
     L(this.legR, 'x', -legR);
     L(this.armL, 'x', -armL);
-    L(this.armR, 'x', -armR);
+    L(this.armR, 'x', -armR, fa);
     L(this.armL, 'z', -armLz);
-    L(this.armR, 'z', -armRz);
-    L(this.torso, 'x', lean);
+    L(this.armR, 'z', -armRz, fa);
+    L(this.torso, 'x', lean, fa);
     L(this.head, 'x', headX - lean * 0.5);
-    L(this.body, 'y', bodyRotY);
+    L(this.body, 'x', bodyRotX, Math.min(1, dt * 9)); // 쓰러지고 일어나는 것은 조금 천천히
+    L(this.body, 'y', bodyRotY, fa);
     L(this.body, 'z', bodyRotZ);
     this.body.position.y += (bodyY - this.body.position.y) * f;
+    this.body.position.z += (bodyZ - this.body.position.z) * fa;
     this.torso.scale.y = 1 + breath;
+
+    const held = this.wpn > 2 ? this.gear[this.wpn] : null;
+    if (held) held.position.z = -recoil;
+
+    if (ko && this.stars) {
+      // 별은 누운 머리 위에서 돈다(쓰러지는 동안에는 머리를 따라 내려온다)
+      const st = this.stars;
+      const lie = -this.body.rotation.x; // 0(서 있음) → π/2(누움)
+      const headH = this.torso.position.y + this.head.position.y;
+      st.position.set(0, this.body.position.y + headH * Math.cos(lie) + 0.5, -headH * Math.sin(lie));
+      for (let i = 0; i < st.children.length; i++) {
+        const m = st.children[i];
+        const a = t * 3.4 + (i * Math.PI * 2) / st.children.length;
+        m.position.set(Math.cos(a) * 0.36, Math.sin(t * 5 + i * 2) * 0.04, Math.sin(a) * 0.36);
+        m.rotation.y = t * 5 + i;
+      }
+    }
+
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      this.jacket.emissive.setScalar(this.flashT > 0 ? (this.flashT / FLASH_DUR) * 0.9 : 0);
+    }
 
     if (this.bubble) {
       this.bubbleT -= dt;
@@ -394,5 +688,16 @@ export class Avatar {
       this.back.material.dispose();
     }
     this.jacket.dispose();
+    // 난투 소품: 지오메트리·재질은 모든 아바타가 함께 쓰므로 지우지 않고, 이 아바타가 만든 객체만 떼어 낸다
+    for (let i = 0; i < this.gear.length; i++) {
+      if (this.gear[i]) this.gear[i].removeFromParent();
+      this.gear[i] = null;
+    }
+    if (this.stars) this.stars.removeFromParent();
+    if (this.hpBar) this.hpBar.removeFromParent();
+    this.stars = this.hpBar = this.hpFill = null;
+    this.wpn = 0;
+    this.ko = false;
+    this.hp = null;
   }
 }

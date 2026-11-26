@@ -45,9 +45,10 @@ export function buildProps(engine, world) {
   const anchors = {};
 
   // ---------- 나무·덤불 ----------
-  {
+  // 배치는 칸 크기(품질)에 따라 달라진다. 길가 주차 차량은 모든 기기에서 같은 자리에 서야 해서
+  // 두 품질의 배치를 모두 구해 두고(plantSets), 이 기기에는 제 품질 것만 심는다.
+  const scatterPlants = (CELL) => {
     const rnd = makeRng(777);
-    const CELL = low ? 9.5 : 7;
     const trees = [];
     const bushes = [];
     for (let z = Z0 + 5; z < Z1 - 5; z += CELL) {
@@ -73,6 +74,11 @@ export function buildProps(engine, world) {
         }
       }
     }
+    return { trees, bushes };
+  };
+  const plantSets = [scatterPlants(7), scatterPlants(9.5)]; // [보통, 저사양]
+  {
+    const { trees, bushes } = plantSets[low ? 1 : 0];
     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 2.6, 6);
     trunkGeo.translate(0, 1.3, 0);
     const roundGeo = new THREE.IcosahedronGeometry(1.75, 0);
@@ -254,6 +260,15 @@ export function buildProps(engine, world) {
   }
 
   // ---------- 주차된 차 ----------
+  // 차량 번호(parked의 순서)는 통신에 쓰인다 → 모든 기기에서 같은 순서·같은 개수여야 한다.
+  // 주차장 차량이 앞 번호이고, 길가 주차 차량은 안내판·깃발 등이 다 놓인 뒤 맨 끝에서 덧붙인다.
+  // 기록: { i, x, y(지면 높이), z, rot(앞 방향이 (sin rot, cos rot)), color, col: [뒤·앞 충돌 원 번호], visible }
+  const parked = [];
+  const CAR_PAL = [0xf2f2f2, 0xd9dcde, 0x2b2f36, 0x8d949c, 0x1f4e8c, 0xa62b2b, 0x3c6e57, 0xe9e2d0, 0x565e68];
+  const LOT_MAX = 150;
+  const ROADSIDE_MAX = 16;
+  let carBody = null;
+  let carCab = null;
   {
     const rnd = makeRng(4242);
     const cars = [];
@@ -291,31 +306,34 @@ export function buildProps(engine, world) {
         }
       }
     }
-    const max = low ? 60 : 150;
-    const list = cars.slice(0, max);
+    const list = cars.slice(0, LOT_MAX); // 품질과 무관하게 같은 개수
     const bodyGeo = new Geo().box(0, 0.62, 0, 1.8, 0.62, 4.3).box(0, 0.25, 1.45, 1.85, 0.3, 0.5).box(0, 0.25, -1.45, 1.85, 0.3, 0.5).build();
     const cabGeo = new Geo().box(0, 1.2, -0.15, 1.6, 0.58, 2.3).build();
-    const body = new THREE.InstancedMesh(bodyGeo, lamb(0xffffff), list.length);
-    const cab = new THREE.InstancedMesh(cabGeo, lamb(0x1f2a36), list.length);
-    const PAL = [0xf2f2f2, 0xd9dcde, 0x2b2f36, 0x8d949c, 0x1f4e8c, 0xa62b2b, 0x3c6e57, 0xe9e2d0, 0x565e68];
+    // 길가 주차 차량 몫까지 자리를 잡아 두고, 실제 대수(count)는 길가 차량을 놓은 뒤에 정한다
+    const body = new THREE.InstancedMesh(bodyGeo, lamb(0xffffff), list.length + ROADSIDE_MAX);
+    const cab = new THREE.InstancedMesh(cabGeo, lamb(0x1f2a36), list.length + ROADSIDE_MAX);
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const col = new THREE.Color();
     list.forEach((c, i) => {
+      const y = heightAt(c.x, c.z);
+      const color = CAR_PAL[Math.floor(c.c * CAR_PAL.length)];
       q.setFromAxisAngle(up, c.rot);
-      m4.compose(new THREE.Vector3(c.x, heightAt(c.x, c.z) + 0.02, c.z), q, new THREE.Vector3(1, 1, 1));
+      m4.compose(new THREE.Vector3(c.x, y + 0.02, c.z), q, new THREE.Vector3(1, 1, 1));
       body.setMatrixAt(i, m4);
       cab.setMatrixAt(i, m4);
-      body.setColorAt(i, col.setHex(PAL[Math.floor(c.c * PAL.length)]));
-      collider.addCircle(c.x - Math.sin(c.rot) * 1.0, c.z - Math.cos(c.rot) * 1.0, 1.05);
-      collider.addCircle(c.x + Math.sin(c.rot) * 1.0, c.z + Math.cos(c.rot) * 1.0, 1.05);
+      body.setColorAt(i, col.setHex(color));
+      const c0 = collider.addCircle(c.x - Math.sin(c.rot) * 1.0, c.z - Math.cos(c.rot) * 1.0, 1.05);
+      const c1 = collider.addCircle(c.x + Math.sin(c.rot) * 1.0, c.z + Math.cos(c.rot) * 1.0, 1.05);
+      parked.push({ i, x: c.x, y, z: c.z, rot: c.rot, color, col: [c0, c1], visible: true });
     });
     for (const m of [body, cab]) {
       m.castShadow = !low;
-      m.computeBoundingSphere();
       group.add(m);
     }
+    carBody = body;
+    carCab = cab;
   }
 
   // ---------- 건물 안내판(스탬프 찍는 곳) ----------
@@ -583,10 +601,232 @@ export function buildProps(engine, world) {
     }
   }
 
+  // ---------- 길가 주차 차량 ----------
+  // 교내 찻길의 도로 폭 밖 길가에, 길 방향으로, 서로 40m 안팎 떨어뜨려 세운다(최대 16대, 주차장 차량 뒤 번호).
+  // 비탈·건물·계단 때문에 세울 수 있는 자리가 드물어서, 자리를 모두 찾은 다음 고르게 퍼지도록 고른다.
+  // 모든 기기에서 같은 자리가 나와야 하므로 판정에는 품질과 무관한 것만 쓴다:
+  // 나무·덤불은 두 품질의 배치를 모두 피하고, 거리 비교는 사칙연산과 제곱근으로만 한다.
+  {
+    const MIN_GAP = 30; // 차끼리 적어도 이만큼 띄운다(정문 앞 2대만 예외). 지금 지도에서는 가장 가까운 차가 36~50m 거리다
+    const SIDE = 1.6; // 도로 가장자리에서 차 중심선까지
+    const HALF = 2.15; // 차 길이의 절반
+    const ENDS = [-HALF, 0, HALF]; // 차 중심선 위의 검사점: 뒤 끝·가운데·앞 끝
+    const BODY = [-1.4, 0, 1.4]; // 반지름 CLEAR인 원 3개로 차체(와 충돌 원)를 다 덮는다
+    const CLEAR = 1.25;
+    const sq = (v) => v * v;
+    const d2 = (ax, az, bx, bz) => sq(ax - bx) + sq(az - bz);
+    /** 점과 꺾은선 사이 거리의 제곱 */
+    const lineD2 = (x, z, pts) => {
+      let best = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const ax = pts[i][0];
+        const az = pts[i][1];
+        const ex = pts[i + 1][0] - ax;
+        const ez = pts[i + 1][1] - az;
+        const l2 = ex * ex + ez * ez;
+        let t = l2 ? ((x - ax) * ex + (z - az) * ez) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        best = Math.min(best, d2(x, z, ax + ex * t, az + ez * t));
+      }
+      return best;
+    };
+
+    // 차가 걸치면 안 되는 길: 찻길은 폭 밖으로, 계단·무빙워크는 5m 밖으로, 보행로는 넉넉히(길 위 A+ 동전까지 비운다)
+    const ways = [];
+    for (const r of data.roads) {
+      if (r.bridge) continue;
+      const need = r.kind === 'steps' || r.conveying ? 5 : r.kind === 'footway' || r.kind === 'path' || r.kind === 'cycleway' ? r.w / 2 + 2.5 : r.w / 2 + 1.1;
+      const bb = bboxOf(r.pts);
+      ways.push({ pts: r.pts, need2: need * need, bb: [bb[0] - need, bb[1] - need, bb[2] + need, bb[3] + need] });
+    }
+    // 운동장·농구장·광장 같은 평지에는 세우지 않는다(주차장은 괜찮다)
+    const pads = data.areas.filter((a) => a.kind === 'field' || a.kind === 'court' || a.kind === 'square' || a.kind === 'golf' || a.kind === 'smoking');
+    // 7m 안에 세우지 않는 곳: 스폰, 문, 안내판(기둥·스탬프 원·그 앞 빈터), 깃발, 곰, 도착점, 자판기, 운동장 한가운데
+    const keep = [[SPAWN.x, SPAWN.z]];
+    for (const d of doors) keep.push([d.x, d.z]);
+    for (const s of signs) {
+      const d = s.door;
+      keep.push([s.x, s.z], [s.x - d.nx * 1.9, s.z - d.nz * 1.9], [s.x + d.nx * 4.5, s.z + d.nz * 4.5]);
+    }
+    for (const k of ['bear', 'climbStart', 'climbFinish', 'climbGoal', 'vending', 'field']) if (anchors[k]) keep.push([anchors[k].x, anchors[k].z]);
+    // 두 품질의 나무·덤불을 한데 모은다: [x, z, 반지름, …]
+    const plants = [];
+    for (const set of plantSets) {
+      for (const t of set.trees) if (t.zone > 0) plants.push(t.x, t.z, 0.32 * t.s);
+      for (const b of set.bushes) plants.push(b.x, b.z, 0.7 * b.s);
+    }
+
+    const tmp = { x: 0, z: 0 };
+    /** 중심 (x,z), 앞 방향 (fx,fz)로 차를 세워도 되는 자리인가 */
+    const fits = (x, z, fx, fz) => {
+      for (const p of keep) if (d2(x, z, p[0], p[1]) < 49) return false;
+      for (const c of parked) if (d2(x, z, c.x, c.z) < 36) return false; // 다른 차와 6m 이상
+      for (const a of ENDS) {
+        const px = x + fx * a;
+        const pz = z + fz * a;
+        if (!campus.playable(px, pz) || collider.solidAt(px, pz)) return false;
+        const s = campus.slopeAt(px, pz);
+        if (s.dx * s.dx + s.dz * s.dz > 0.0625) return false; // 경사 0.25 이하
+        for (const p of pads) if (inPoly(px, pz, p.poly)) return false;
+        for (const w of ways) {
+          if (px < w.bb[0] || px > w.bb[2] || pz < w.bb[1] || pz > w.bb[3]) continue;
+          if (lineD2(px, pz, w.pts) < w.need2) return false;
+        }
+      }
+      for (const a of BODY) {
+        const px = x + fx * a;
+        const pz = z + fz * a;
+        // 나무·덤불은 resolve보다 조금 더 엄하게 직접 본다 → 이 기기에 없는 쪽 배치 때문에 결과가 갈리지 않는다
+        for (let i = 0; i < plants.length; i += 3) if (d2(px, pz, plants[i], plants[i + 1]) < sq(CLEAR + plants[i + 2] + 0.05)) return false;
+        tmp.x = px;
+        tmp.z = pz;
+        if (collider.resolve(tmp, CLEAR)) return false; // 벽·가로등·벤치·다른 차 등
+      }
+      return true;
+    };
+
+    // 교내 찻길과 누적 길이
+    const lanes = [];
+    for (const r of data.roads) {
+      if (!r.inCampus || r.kind !== 'service' || r.bridge) continue;
+      const cum = [0];
+      for (let i = 0; i < r.pts.length - 1; i++) cum.push(cum[i] + Math.sqrt(d2(r.pts[i][0], r.pts[i][1], r.pts[i + 1][0], r.pts[i + 1][1])));
+      lanes.push({ r, cum, len: cum[cum.length - 1] });
+    }
+    /** 길을 따라 s만큼 간 점 */
+    const along = (ln, s) => {
+      const pts = ln.r.pts;
+      const cum = ln.cum;
+      let i = 0;
+      while (i < cum.length - 2 && cum[i + 1] < s) i++;
+      const t = (s - cum[i]) / (cum[i + 1] - cum[i] || 1);
+      return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t];
+    };
+    /** 길 위 s 지점 옆의 길가 자리. side 1은 진행 방향의 오른쪽, -1은 왼쪽 */
+    const poseAt = (ln, s, side) => {
+      const p = along(ln, s);
+      const a = along(ln, Math.max(0, s - 2.5));
+      const b = along(ln, Math.min(ln.len, s + 2.5));
+      const l = Math.sqrt(d2(a[0], a[1], b[0], b[1]));
+      if (!(l > 0)) return null;
+      const tx = (b[0] - a[0]) / l;
+      const tz = (b[1] - a[1]) / l;
+      const off = (ln.r.w / 2 + SIDE) * side;
+      // 우측통행처럼: 오른쪽에 선 차는 진행 방향을, 왼쪽에 선 차는 반대 방향을 본다
+      return { x: p[0] - tz * off, z: p[1] + tx * off, fx: tx * side, fz: tz * side };
+    };
+    const spawnD2 = (c) => d2(c.x, c.z, SPAWN.x, SPAWN.z);
+
+    // 1) 세울 수 있는 길가 자리를 모두 찾는다: 교내 찻길을 3m 간격으로, 양쪽 다
+    const spots = [];
+    for (const ln of lanes) {
+      for (let s = 3; s <= ln.len - 3; s += 3) {
+        for (const side of [1, -1]) {
+          const c = poseAt(ln, s, side);
+          if (c && fits(c.x, c.z, c.fx, c.fz)) spots.push(c);
+        }
+      }
+    }
+
+    // 2) 정문 진입로: 스폰에서 40m 안에 2대. 스폰에서 가까운 자리부터, 서로 12m 이상 떨어지게
+    const picked = [];
+    const lim = sq(40 - HALF - 1); // 차 전체가 40m 안에 들어오게
+    const near = spots.filter((c) => spawnD2(c) < lim).sort((p, q) => spawnD2(p) - spawnD2(q));
+    for (const c of near) if (picked.length < 2 && picked.every((o) => d2(o.x, o.z, c.x, c.z) >= 144)) picked.push(c);
+
+    // 3) 나머지: 이미 있는 차(주차장·정문 차 포함)에서 가장 먼 자리부터 하나씩 고른다
+    //    → 한쪽에 몰리지 않고 캠퍼스 전체에 고르게 퍼진다. 차끼리 MIN_GAP보다 가까워져야 하면 그만 세운다
+    while (picked.length < ROADSIDE_MAX) {
+      let best = null;
+      let bd = MIN_GAP * MIN_GAP;
+      for (const c of spots) {
+        let d = Infinity;
+        for (const o of parked) d = Math.min(d, d2(o.x, o.z, c.x, c.z));
+        for (const o of picked) d = Math.min(d, d2(o.x, o.z, c.x, c.z));
+        if (d > bd) {
+          bd = d;
+          best = c;
+        }
+      }
+      if (!best) break;
+      picked.push(best);
+    }
+
+    // 세우기: 인스턴스 행렬·색·충돌 원 2개
+    const rnd = makeRng(4243);
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const qy = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const nrm = new THREE.Vector3();
+    const pos = new THREE.Vector3();
+    const one = new THREE.Vector3(1, 1, 1);
+    const col = new THREE.Color();
+    for (const c of picked) {
+      const i = parked.length;
+      // 길가는 비탈이라 수평으로 두면 한쪽이 뜨거나 묻힌다 → 네 바퀴 자리의 지면 높이로 차를 땅에 붙인다
+      const lx = c.fz; // 차의 옆 방향(로컬 +x)
+      const lz = -c.fx;
+      const h = (a, b) => heightAt(c.x + c.fx * a + lx * b, c.z + c.fz * a + lz * b);
+      const h0 = h(1.5, 0.8);
+      const h1 = h(1.5, -0.8);
+      const h2 = h(-1.5, 0.8);
+      const h3 = h(-1.5, -0.8);
+      const y = (h0 + h1 + h2 + h3) / 4;
+      const ga = (h0 + h1 - h2 - h3) / 6; // 앞뒤 기울기
+      const gl = (h0 + h2 - h1 - h3) / 3.2; // 좌우 기울기
+      const rot = Math.atan2(c.fx, c.fz);
+      const color = CAR_PAL[Math.floor(rnd() * CAR_PAL.length)];
+      nrm.set(-(ga * c.fx + gl * lx), 1, -(ga * c.fz + gl * lz)).normalize(); // 지면 법선
+      q.setFromUnitVectors(up, nrm).multiply(qy.setFromAxisAngle(up, rot));
+      m4.compose(pos.set(c.x, y + 0.02, c.z), q, one);
+      carBody.setMatrixAt(i, m4);
+      carCab.setMatrixAt(i, m4);
+      carBody.setColorAt(i, col.setHex(color));
+      const c0 = collider.addCircle(c.x - c.fx, c.z - c.fz, 1.05);
+      const c1 = collider.addCircle(c.x + c.fx, c.z + c.fz, 1.05);
+      parked.push({ i, x: c.x, y, z: c.z, rot, color, col: [c0, c1], visible: true });
+    }
+    // 대수가 정해졌다. 경계 구(화면 밖 판정)는 모든 차가 제자리에 있을 때 한 번만 구한다.
+    for (const m of [carBody, carCab]) {
+      m.count = parked.length;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      m.computeBoundingSphere();
+    }
+  }
+
+  // 차를 숨기거나(터짐·누가 타고 감) 제자리에 되돌린다: 인스턴스 행렬 scale 0/원래 + 충돌 원 끄고 켜기.
+  // why는 숨기는 까닭이다(안 줘도 된다). 모듈마다 다른 이름을 주면 서로의 숨김을 풀지 않는다:
+  // 까닭이 하나라도 남아 있으면 계속 숨고, 다 없어져야 다시 보인다. cars[i].visible은 그 결과.
+  const carHome = carBody.instanceMatrix.array.slice(0, parked.length * 16); // 차마다 원래 행렬
+  const carWhy = parked.map(() => new Set());
+  const carM = new THREE.Matrix4();
+  const setCarVisible = (i, on, why = '') => {
+    if (!Number.isInteger(i) || i < 0 || i >= parked.length) return;
+    const c = parked[i];
+    if (on) carWhy[i].delete(why);
+    else carWhy[i].add(why);
+    const show = carWhy[i].size === 0;
+    if (c.visible === show) return; // 매 프레임 불러도 바뀔 때만 일한다
+    c.visible = show;
+    const o = i * 16;
+    if (show) carM.fromArray(carHome, o);
+    else carM.makeScale(0, 0, 0).setPosition(carHome[o + 12], carHome[o + 13], carHome[o + 14]);
+    carBody.setMatrixAt(i, carM);
+    carCab.setMatrixAt(i, carM);
+    carBody.instanceMatrix.needsUpdate = true;
+    carCab.instanceMatrix.needsUpdate = true;
+    collider.setCircleEnabled(c.col[0], show);
+    collider.setCircleEnabled(c.col[1], show);
+  };
+
   return {
     group,
     signs,
     anchors,
+    cars: parked,
+    setCarVisible,
     update(dt, t) {
       for (const f of updaters) f(dt, t);
     },

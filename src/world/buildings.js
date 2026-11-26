@@ -1,7 +1,7 @@
 // 캠퍼스 건물과 주변 건물. 평면은 OSM, 외벽 색·창 모양은 공식 안내 사진을 보고 정한 스타일 표를 쓴다.
 import * as THREE from 'three';
 import data from '../../data/campus-data.js';
-import { Geo, insetPoly, inPoly, centroid } from './geom.js';
+import { Geo, insetPoly, inPoly, centroid, signedArea } from './geom.js';
 import { facadeTexture, windowLightTexture, textPlane } from './textures.js';
 import { makeRng } from '../core/rng.js';
 
@@ -72,12 +72,27 @@ export function buildBuildings(engine, collider) {
     if (!mats[k]) mats[k] = new THREE.MeshLambertMaterial({ color });
     return mats[k];
   };
-  const add = (geo, material, shadow = true) => {
+  // parent를 주지 않으면 group에 바로 넣는다(연결 통로·주변 건물·골프 그물)
+  const add = (geo, material, shadow = true, parent = group) => {
     const m = new THREE.Mesh(geo.build(), material);
     m.castShadow = shadow;
     m.receiveShadow = true;
-    group.add(m);
+    parent.add(m);
     return m;
+  };
+  // 건물 대표색 2~3개(숫자 hex, 잔해 색 등에 쓴다): 층을 많이 차지하는 외벽 띠부터, 그리고 지붕색.
+  // 유리 외벽(curtain)은 벽 색이 없어서 유리색을 쓴다.
+  const bandColor = (name) => new THREE.Color(FACADES[name].wall || FACADES[name].glass).getHex();
+  const mainColors = (st) => {
+    const out = [];
+    const bands = st.bands.slice().sort((p, q) => q[2] - q[1] - (p[2] - p[1]));
+    for (const [name] of bands) {
+      const c = bandColor(name);
+      if (out.length < 2 && !out.includes(c)) out.push(c);
+    }
+    if (!out.includes(st.roof[1])) out.push(st.roof[1]);
+    if (st.pilaster && out.length < 3 && !out.includes(st.pilaster)) out.push(st.pilaster);
+    return out;
   };
 
   const doors = [];
@@ -88,17 +103,26 @@ export function buildBuildings(engine, collider) {
     if (!b.campus) continue;
     const st = STYLE[b.key];
     if (!st) continue;
-    byKey[b.key] = b;
+    // 건물 한 동의 메시는 모두 shell에 넣고, pivot(평면 중심·바닥 높이)이 shell(−중심)을 품는다.
+    // 두 이동이 상쇄되어 메시는 지금까지와 같은 자리에 있고(shell 안의 좌표 = 월드 좌표),
+    // pivot.scale.y만 줄이면 건물이 제자리에서 바닥 쪽으로 주저앉는다(무너짐·재건 연출).
+    const pivot = new THREE.Group();
+    pivot.name = 'bld:' + b.key;
+    pivot.position.set(b.c[0], b.low, b.c[1]);
+    const shell = new THREE.Group();
+    shell.position.set(-b.c[0], -b.low, -b.c[1]);
+    pivot.add(shell);
+    group.add(pivot);
     const fh = b.floorH;
     // 땅에 묻히는 밑동
-    add(new Geo().walls(b.poly, b.low - 4, b.base + 0.02, st.bay), flat(0xa7a399));
+    add(new Geo().walls(b.poly, b.low - 4, b.base + 0.02, st.bay), flat(0xa7a399), true, shell);
     st.bands.forEach(([name, f0, f1], bi) => {
       // 마지막 띠는 지붕까지 올린다(층수가 표보다 많은 건물 대비)
       const last = bi === st.bands.length - 1;
       const top = last ? Math.max(f1, b.floors || f1) : f1;
       const y0 = b.base + f0 * fh;
       const y1 = last ? b.top : Math.min(b.top, b.base + f1 * fh);
-      add(new Geo().walls(b.poly, y0, y1, st.bay, f0, top), mat(name));
+      add(new Geo().walls(b.poly, y0, y1, st.bay, f0, top), mat(name), true, shell);
     });
     // 지붕
     const [rt, rc, inset, rise] = st.roof;
@@ -107,15 +131,15 @@ export function buildBuildings(engine, collider) {
       const eave = insetPoly(b.poly, -0.9);
       roof.walls(eave, b.top - 0.1, b.top + 0.35, 4);
       roof.hipRoof(eave, b.top + 0.35, inset + 0.9, rise);
-      add(roof, flat(rc));
+      add(roof, flat(rc), true, shell);
     } else if (rt === 'slab') {
       const eave = insetPoly(b.poly, -1.1);
       roof.walls(eave, b.top, b.top + 0.35, 4).cap(eave, b.top + 0.35);
-      add(roof, flat(rc));
+      add(roof, flat(rc), true, shell);
     } else {
       roof.walls(b.poly, b.top, b.top + 0.9, 4);
-      add(roof, flat(0xe4e2dc));
-      add(new Geo().cap(insetPoly(b.poly, 0.35), b.top + 0.55), flat(rc), false);
+      add(roof, flat(0xe4e2dc), true, shell);
+      add(new Geo().cap(insetPoly(b.poly, 0.35), b.top + 0.55), flat(rc), false, shell);
       // 옥상 설비
       if (st.equip) {
         const eq = new Geo();
@@ -128,7 +152,7 @@ export function buildBuildings(engine, collider) {
           eq.box(x, b.top + 0.55 + 1.1, z, rnd.range(3, 6), 2.2, rnd.range(2.5, 4), rnd() * 3);
           placed++;
         }
-        if (placed) add(eq, flat(0xc9ccce));
+        if (placed) add(eq, flat(0xc9ccce), true, shell);
       }
     }
     // 전산관: 모서리마다 흰 기둥(벽돌 + 흰 콘크리트 틀)
@@ -143,9 +167,29 @@ export function buildBuildings(engine, collider) {
         if (cross <= 0) continue; // 볼록한 모서리만
         pg.box(p[0], (b.low - 2 + b.top) / 2, p[1], 0.9, b.top - b.low + 2, 0.9, Math.atan2(c[0] - p[0], c[1] - p[1]));
       }
-      add(pg, flat(st.pilaster));
+      add(pg, flat(st.pilaster), true, shell);
     }
-    collider.addPoly(b.poly, b.top + 4, b.low - 4);
+    // 충돌체의 top/base는 카메라가 벽을 뚫지 않게 여유를 둔 값이다. 실제 지붕 높이는 아래 기록의 top.
+    const solid = collider.addPoly(b.poly, b.top + 4, b.low - 4, b.key);
+    // 파괴·탄 판정이 쓰는 건물 기록. 가져온 데이터(b)는 고치지 않고 새 객체로 만든다.
+    let radius = 0;
+    for (const p of b.poly) radius = Math.max(radius, Math.hypot(p[0] - b.c[0], p[1] - b.c[1]));
+    byKey[b.key] = {
+      key: b.key,
+      name: b.name,
+      letter: b.letter,
+      poly: b.poly,
+      c: b.c,
+      base: b.base,
+      top: b.top,
+      low: b.low,
+      floors: b.floors,
+      pivot,
+      colors: mainColors(st),
+      radius,
+      area: Math.abs(signedArea(b.poly)),
+      solid,
+    };
 
     // 출입구: 유리문 + 캐노피 + 건물 이름
     if (b.door) {
@@ -170,7 +214,7 @@ export function buildBuildings(engine, collider) {
           dg.add(sign);
         }
       }
-      group.add(dg);
+      shell.add(dg); // dg의 위치는 월드 좌표 그대로다(shell 안의 좌표 = 월드 좌표)
       doors.push({ key: b.key, name: b.name, letter: b.letter, x: d.x + d.nx * 1.6, z: d.z + d.nz * 1.6, y: dy, nx: d.nx, nz: d.nz });
     }
   }

@@ -9,8 +9,9 @@ import { createRemotes } from './net/remotes.js';
 import { createUI } from './ui/ui.js';
 import { createMinimap } from './ui/minimap.js';
 import { store } from './store.js';
-import { CLUBS, VERSION } from './config.js';
+import { CLUBS, VERSION, ZONES } from './config.js';
 import { createGame } from './game/game.js';
+import { createMayhem } from './mayhem/index.js';
 import { buildProps } from './world/props.js';
 import { buildInterior } from './world/interior.js';
 import { sfx } from './core/sfx.js';
@@ -29,7 +30,6 @@ const nextFrame = () =>
     requestAnimationFrame(() => setTimeout(f, 0));
     setTimeout(f, 80);
   });
-const ZONE_CODE = { campus: 'c', js4: 'j4', js5: 'j5' };
 
 async function boot() {
   const input = createInput(canvas);
@@ -89,6 +89,9 @@ async function boot() {
   const remotes = createRemotes(engine, net, () => player.zone);
   const minimap = createMinimap(world, document.getElementById('minimap'));
   const game = createGame({ engine, world, player, cam, input, ui, net, remotes, store, minimap, profile });
+  // 난투(무기·파괴·차량·보스). 무기 바꾸기 입력(Q·무기 막대)은 이 모듈이 직접 받는다.
+  const mayhem = createMayhem({ engine, world, player, cam, input, ui, net, remotes, store, profile, game });
+  game.mayhem = mayhem;
   ui.showHud();
 
   const clubColor = (p) => (CLUBS.find((c) => c.id === p.c) || {}).color || '#cfe3ff';
@@ -128,35 +131,56 @@ async function boot() {
 
   // ----- 감정표현 -----
   input.on('emote', (n) => {
-    if (ui.panel.isOpen()) return;
+    if (ui.panel.isOpen() || mayhem.isFrozen()) return;
     player.avatar.playEmote(n);
   });
 
+  // ----- 통신에 실을 내 상태 -----
+  // 보낼 때마다 지금 값으로 만든다(같은 객체를 고쳐 쓴다 — net이 값을 베껴 간다).
+  // flags 비트: 1 공중, 2 달리기, 4 기절. zone은 통신 코드(모르는 구역이면 내부 id 그대로 — net이 기본 구역으로 바꿔 보낸다).
+  const netState = { x: 0, y: 0, z: 0, yaw: 0, flags: 0, zone: '', emote: 0, hp: 100, wpn: 0, atk: 0, car: -1, ax: 0, az: 0 };
+  function buildNetState() {
+    const m = mayhem.netState();
+    netState.x = player.pos.x;
+    netState.y = player.pos.y;
+    netState.z = player.pos.z;
+    netState.yaw = player.yaw;
+    netState.flags = (player.onGround ? 0 : 1) | (player.running ? 2 : 0) | (m.ko ? 4 : 0);
+    netState.zone = Object.hasOwn(ZONES, player.zone) ? ZONES[player.zone] : player.zone;
+    netState.emote = player.avatar.emote;
+    netState.hp = m.hp;
+    netState.wpn = m.wpn;
+    netState.atk = m.atk;
+    netState.car = m.car;
+    netState.ax = m.ax;
+    netState.az = m.az;
+    return netState;
+  }
+
   // ----- 프레임 -----
   let netT = 0;
-  let lastNetState = null;
-  // 탭이 가려지면 화면 갱신(rAF)이 멈추므로, 그동안은 타이머로 생존 신호만 보낸다
+  let running = false; // 첫 프레임이 돈 뒤부터 true
+  // 탭이 가려지면 화면 갱신(rAF)이 멈추므로, 그동안은 타이머로 생존 신호만 보낸다.
+  // 숨기 직전 값을 기억해 두지 않고 그때그때 새로 만든다(가려질 때 무기를 넣은 것이 그대로 나가게).
   setInterval(() => {
-    if (document.hidden && lastNetState) net.tick(1, lastNetState);
+    if (document.hidden && running) net.tick(1, buildNetState());
   }, 1000);
+  // 탭이 가려지는 순간 난투 모듈이 무기를 넣는다(이보다 먼저 등록된 리스너). 바뀐 상태를 바로 한 번 알린다.
+  // 발신 제한에 걸려 못 나가도 위의 타이머가 1초 안에 다시 보낸다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && running) net.sendState(buildNetState());
+  });
   engine.onUpdate((dt) => {
+    running = true;
     input.poll();
-    player.frozen = ui.panel.isOpen() || !!player.climbFrozen;
+    player.frozen = ui.panel.isOpen() || !!player.climbFrozen || mayhem.isFrozen();
+    mayhem.update(dt);
     player.update(dt);
     cam.update(dt, player.pos, world.active);
     engine.follow(player.pos.x, player.pos.y, player.pos.z);
     remotes.update(dt);
     game.update(dt);
-    lastNetState = {
-      x: player.pos.x,
-      y: player.pos.y,
-      z: player.pos.z,
-      yaw: player.yaw,
-      flags: (player.onGround ? 0 : 1) | (player.running ? 2 : 0),
-      zone: ZONE_CODE[player.zone] || 'c',
-      emote: player.avatar.emote,
-    };
-    net.tick(dt, lastNetState);
+    net.tick(dt, buildNetState());
     netT += dt;
     if (netT > 0.5) {
       netT = 0;
@@ -171,7 +195,7 @@ async function boot() {
   game.start();
 
   // 디버그: 숨겨진 창에서는 WebGL 화면이 스크린샷에 안 잡혀서, 그린 직후의 캔버스를 <img>로 덮어 확인한다.
-  window.__dl = Object.assign(window.__dl || {}, { engine, input, world, cam, player, net, remotes, game, ui, store });
+  window.__dl = Object.assign(window.__dl || {}, { engine, input, world, cam, player, net, remotes, game, mayhem, ui, store });
 }
 
 window.__dl = {

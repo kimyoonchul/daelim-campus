@@ -1,5 +1,7 @@
 // 브라우저에만 저장되는 진행 상황(프로필·스탬프·기록). 서버에는 아무것도 남지 않는다.
-const KEY = 'dlc.v1';
+import { GAME } from './config.js';
+
+const KEY = GAME.storeKey; // 저장 키는 설정에서(다른 장소 버전은 다른 키를 쓴다)
 
 function load() {
   try {
